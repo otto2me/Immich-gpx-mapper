@@ -27,6 +27,7 @@ export type AlbumAssetPage = {
   items: Asset[];
   total: number;
   page: number;
+  pageSize: number;
   hasMore: boolean;
 };
 
@@ -114,6 +115,7 @@ export const api = {
   logout: () =>
     request<{ authenticated: boolean }>("/api/auth/logout", { method: "POST" }),
   albums: () => request<Album[]>("/api/albums"),
+  komootLinkedAlbums: () => request<string[]>("/api/tours/komoot-linked-albums"),
   album: (id: string) =>
     request<Album>(`/api/albums/${encodeURIComponent(id)}`),
   albumMapMarkers: (id: string) =>

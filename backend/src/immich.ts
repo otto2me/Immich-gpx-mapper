@@ -94,6 +94,7 @@ export async function registerImmichRoutes(
             fileCreatedAt?: string | null;
           }>;
           total?: number;
+          nextPage?: string | null;
         };
       };
       const items = (result.assets?.items ?? []).map((asset) => ({
@@ -108,7 +109,8 @@ export async function registerImmichRoutes(
         items,
         total,
         page,
-        hasMore: page * pageSize < total
+        pageSize,
+        hasMore: Boolean(result.assets?.nextPage)
       };
     }
   );

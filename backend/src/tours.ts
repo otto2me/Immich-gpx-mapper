@@ -99,6 +99,15 @@ export async function registerTourRoutes(
     limits: { fileSize: maxUploadBytes, files: 1, fields: 0 }
   });
 
+  app.get("/api/tours/komoot-linked-albums", async () => {
+    const rows = database.prepare(`
+      SELECT immich_album_id
+      FROM tours
+      WHERE komoot_link IS NOT NULL AND TRIM(komoot_link) != ''
+    `).all() as Array<{ immich_album_id: string }>;
+    return rows.map(({ immich_album_id }) => immich_album_id);
+  });
+
   app.get<{ Params: { albumId: string } }>(
     "/api/tours/:albumId",
     async (request) => toApiTour(getTour(database, request.params.albumId))

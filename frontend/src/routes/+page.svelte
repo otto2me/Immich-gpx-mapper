@@ -15,13 +15,17 @@
   } from "../lib/api.js";
 
   const appVersion = __APP_VERSION__;
+  const albumsPerPage = 12;
   let albums = $state<Album[]>([]);
+  let komootLinkedAlbumIds = $state<string[]>([]);
+  let albumsPage = $state(1);
   let selectedAlbum = $state<Album | null>(null);
   let tour = $state<Tour>(emptyTour());
   let comments = $state<Comment[]>([]);
   let immichWebUrl = $state<string | null>(null);
   let albumAssets = $state<Asset[]>([]);
   let albumAssetsPage = $state(0);
+  let albumAssetsPageSize = $state(48);
   let albumAssetsTotal = $state(0);
   let albumAssetsHasMore = $state(false);
   let albumAssetsLoading = $state(false);
@@ -36,6 +40,7 @@
   let error = $state("");
   let notice = $state("");
   let search = $state("");
+  let onlyKomootLinked = $state(false);
   let password = $state("");
   let author = $state("");
   let commentText = $state("");
@@ -48,11 +53,21 @@
     komootPreview ? komootEmbedUrl(tour.komootLink) : null
   );
   const tourEmbedUrl = $derived(komootEmbedUrl(tour.komootLink));
+  const albumAssetsTotalPages = $derived(
+    Math.max(1, Math.ceil(albumAssetsTotal / albumAssetsPageSize))
+  );
 
   const filteredAlbums = $derived(
     albums.filter((album) =>
+      (!onlyKomootLinked || komootLinkedAlbumIds.includes(album.id)) &&
       album.albumName.toLocaleLowerCase().includes(search.toLocaleLowerCase())
     )
+  );
+  const albumPagesTotal = $derived(
+    Math.max(1, Math.ceil(filteredAlbums.length / albumsPerPage))
+  );
+  const pagedAlbums = $derived(
+    filteredAlbums.slice((albumsPage - 1) * albumsPerPage, albumsPage * albumsPerPage)
   );
 
   function message(reason: unknown) {
@@ -62,8 +77,14 @@
   async function loadAlbums() {
     error = "";
     loading = true;
+    albumsPage = 1;
     try {
-      albums = await api.albums();
+      const [loadedAlbums, linkedAlbumIds] = await Promise.all([
+        api.albums(),
+        api.komootLinkedAlbums().catch(() => [])
+      ]);
+      albums = loadedAlbums;
+      komootLinkedAlbumIds = linkedAlbumIds;
     } catch (reason) {
       error = message(reason);
     } finally {
@@ -79,6 +100,7 @@
     komootDisplayMode = "embed";
     albumAssets = [];
     albumAssetsPage = 0;
+    albumAssetsPageSize = 48;
     albumAssetsTotal = 0;
     albumAssetsHasMore = false;
     albumAssetsLoading = false;
@@ -108,22 +130,22 @@
     }
   }
 
-  async function loadMoreAlbumAssets() {
+  async function loadAlbumAssets(page: number) {
     const albumId = selectedAlbum?.id;
     if (
-      !albumId || albumAssetsLoading ||
-      (albumAssetsPage > 0 && !albumAssetsHasMore)
+      !albumId || albumAssetsLoading || page < 1 ||
+      (albumAssetsTotal > 0 && page > albumAssetsTotalPages)
     ) return;
 
-    const page = albumAssetsPage + 1;
     albumAssetsLoading = true;
     albumAssetsError = "";
     try {
       const result = await api.albumAssets(albumId, page);
       if (selectedAlbum?.id !== albumId) return;
-      albumAssets = [...albumAssets, ...result.items];
+      albumAssets = result.items;
       albumAssetsPage = result.page;
-      albumAssetsTotal = result.total;
+      albumAssetsPageSize = result.pageSize;
+      albumAssetsTotal = selectedAlbum.assetCount ?? result.total;
       albumAssetsHasMore = result.hasMore;
     } catch (reason) {
       albumAssetsError = message(reason);
@@ -134,7 +156,7 @@
 
   function onAlbumGalleryToggle(event: Event) {
     const details = event.currentTarget as HTMLDetailsElement;
-    if (details.open && albumAssetsPage === 0) void loadMoreAlbumAssets();
+    if (details.open && albumAssetsPage === 0) void loadAlbumAssets(1);
   }
 
   function immichAssetUrl(albumId: string, assetId: string) {
@@ -450,10 +472,22 @@
             </div>
           {/each}
         </div>
-        {#if albumAssetsHasMore}
-          <button class="secondary-button album-load-more" type="button" disabled={albumAssetsLoading} onclick={loadMoreAlbumAssets}>
-            {albumAssetsLoading ? "Wird geladen ..." : "Weitere Fotos laden"}
-          </button>
+        {#if albumAssetsTotalPages > 1}
+          <nav class="album-pagination" aria-label="Albumfotos-Seiten">
+            <button
+              class="secondary-button"
+              type="button"
+              disabled={albumAssetsLoading || albumAssetsPage <= 1}
+              onclick={() => loadAlbumAssets(albumAssetsPage - 1)}
+            >Zurück</button>
+            <span>Seite {albumAssetsPage} von {albumAssetsTotalPages}</span>
+            <button
+              class="secondary-button"
+              type="button"
+              disabled={albumAssetsLoading || !albumAssetsHasMore}
+              onclick={() => loadAlbumAssets(albumAssetsPage + 1)}
+            >Weiter</button>
+          </nav>
         {/if}
       {:else if !albumAssetsLoading}
         <p class="muted">Keine Fotos in diesem Album.</p>
@@ -812,12 +846,30 @@
       <div class="library-heading">
         <div>
           <p class="eyebrow">Deine Sammlung</p>
-          <h2>Alben <span class="count">{albums.length}</span></h2>
+          <h2>Alben <span class="count">{filteredAlbums.length}</span></h2>
         </div>
-        <div class="search-wrap">
-          <span aria-hidden="true">⌕</span>
-          <label class="sr-only" for="album-search">Alben suchen</label>
-          <input id="album-search" placeholder="Album suchen ..." bind:value={search} />
+        <div class="library-controls">
+          <button
+            class="komoot-filter"
+            type="button"
+            aria-label="Nur Komoot-verknüpfte Alben anzeigen"
+            aria-pressed={onlyKomootLinked}
+            title="Nur Komoot-verknüpfte Alben anzeigen"
+            onclick={() => {
+              onlyKomootLinked = !onlyKomootLinked;
+              albumsPage = 1;
+            }}
+          ><span aria-hidden="true">⛓</span></button>
+          <div class="search-wrap">
+            <span aria-hidden="true">⌕</span>
+            <label class="sr-only" for="album-search">Alben suchen</label>
+            <input
+              id="album-search"
+              placeholder="Album suchen ..."
+              bind:value={search}
+              oninput={() => (albumsPage = 1)}
+            />
+          </div>
         </div>
       </div>
 
@@ -825,7 +877,7 @@
         <div class="empty-state"><span class="spinner"></span><p>Alben werden geladen ...</p></div>
       {:else if filteredAlbums.length}
         <div class="album-grid">
-          {#each filteredAlbums as album (album.id)}
+          {#each pagedAlbums as album (album.id)}
             <button class="album-card" onclick={() => openAlbum(album)}>
               <div class="album-cover">
                 {#if album.albumThumbnailAssetId}
@@ -839,10 +891,30 @@
                 <strong>{album.albumName}</strong>
                 <span>{album.description || "Tourdetails und Fotos ansehen"}</span>
               </div>
+              {#if komootLinkedAlbumIds.includes(album.id)}
+                <span class="komoot-linked" title="Mit Komoot verknüpft" aria-label="Mit Komoot verknüpft">⛓</span>
+              {/if}
               <span class="card-arrow" aria-hidden="true">↗</span>
             </button>
           {/each}
         </div>
+        {#if albumPagesTotal > 1}
+          <nav class="album-pagination" aria-label="Albumseiten">
+            <button
+              class="secondary-button"
+              type="button"
+              disabled={albumsPage <= 1}
+              onclick={() => (albumsPage -= 1)}
+            >Zurück</button>
+            <span>Seite {albumsPage} von {albumPagesTotal}</span>
+            <button
+              class="secondary-button"
+              type="button"
+              disabled={albumsPage >= albumPagesTotal}
+              onclick={() => (albumsPage += 1)}
+            >Weiter</button>
+          </nav>
+        {/if}
       {:else}
         <div class="empty-state">
           <span class="empty-icon">▱</span>
@@ -909,6 +981,10 @@
   h2 { margin: 0; font-size: 1.45rem; letter-spacing: -.03em; }
   .count { display: inline-grid; min-width: 1.55rem; height: 1.55rem; place-items: center; margin-left: .35rem; padding: 0 .35rem; border-radius: 2rem; background: #e9eee7; color: #718071; font-size: .72rem; vertical-align: .15rem; }
   .search-wrap { display: flex; align-items: center; gap: .5rem; width: min(100%, 16rem); color: #819082; }
+  .library-controls { display: flex; align-items: center; gap: .5rem; }
+  .komoot-filter { display: inline-grid; flex: 0 0 auto; width: 2.55rem; height: 2.55rem; place-items: center; padding: 0; border: 1px solid #dfe7dd; border-radius: .65rem; background: #fbfcfa; color: #718071; font-size: 1rem; }
+  .komoot-filter[aria-pressed="true"] { border-color: #b7cfb9; background: #e9f2ea; color: #456f4e; }
+  .komoot-filter:hover { background: #edf3eb; }
   .search-wrap input { border-color: #e0e6df; background: #fbfcfa; font-size: .86rem; }
   .album-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.15rem; margin-top: 1.4rem; }
   .album-card { position: relative; overflow: hidden; padding: 0; border: 1px solid #e5eae3; border-radius: 1rem; background: #fff; color: inherit; text-align: left; transition: transform .18s ease, box-shadow .18s ease; }
@@ -919,6 +995,7 @@
   .cover-placeholder { color: #93a793; font-size: 3rem; }
   .asset-count { position: absolute; right: .75rem; bottom: .7rem; padding: .33rem .55rem; border: 1px solid #ffffff80; border-radius: 2rem; background: #202a23a8; color: white; font-size: .69rem; backdrop-filter: blur(8px); }
   .album-card-info { display: grid; gap: .35rem; padding: 1rem 2.5rem 1.1rem 1rem; }
+  .komoot-linked { position: absolute; right: 2.5rem; bottom: 1.04rem; display: grid; width: 1.55rem; height: 1.55rem; place-items: center; border-radius: 50%; background: #e9f2ea; color: #456f4e; font-size: .78rem; line-height: 1; }
   .album-card-info strong { overflow: hidden; font-size: .98rem; text-overflow: ellipsis; white-space: nowrap; }
   .album-card-info span { overflow: hidden; color: #849084; font-size: .77rem; text-overflow: ellipsis; white-space: nowrap; }
   .card-arrow { position: absolute; right: 1rem; bottom: 1.15rem; color: #809080; }
@@ -977,7 +1054,8 @@
   .album-photo-card { display: grid; min-width: 0; align-content: start; justify-items: start; gap: .25rem; }
   .album-photo-map { display: inline-flex; min-height: 1.45rem; align-items: center; gap: .2rem; padding: .18rem .35rem; border: 0; border-radius: .35rem; background: transparent; color: #55745d; font-size: .65rem; font-weight: 650; line-height: 1.1; }
   .album-photo-map:hover { background: #edf3eb; }
-  .album-load-more { margin-top: .8rem; }
+  .album-pagination { display: flex; align-items: center; justify-content: center; gap: .75rem; margin-top: .85rem; }
+  .album-pagination > span { color: #6f7e70; font-size: .74rem; font-variant-numeric: tabular-nums; }
   .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
   .panel { min-width: 0; padding: clamp(1.1rem, 2.3vw, 1.7rem); border: 1px solid #e5eae3; border-radius: 1rem; background: #fff; }
   .section-title { align-items: center; margin-bottom: 1.25rem; }
@@ -1041,7 +1119,8 @@
     .album-grid { grid-template-columns: 1fr; }
     .album-cover { height: 190px; }
     .library-heading { align-items: start; flex-direction: column; }
-    .search-wrap { width: 100%; }
+    .library-controls, .search-wrap { width: 100%; }
+    .search-wrap { flex: 1; }
     .album-heading { align-items: start; flex-direction: column; }
     .form-row, .form-row:has(select) { grid-template-columns: 1fr; }
     .komoot-embed { min-height: 560px; }
