@@ -559,57 +559,61 @@
           </div>
         {/if}
 
-        {#if tourEmbedUrl && (tour.hasKomootMap || tour.hasElevationProfile)}
-          <div class="komoot-view-toggle" role="group" aria-label="Ansicht der Komoot-Daten">
-            <button
-              class:active={komootDisplayMode === "embed"}
-              type="button"
-              aria-pressed={komootDisplayMode === "embed"}
-              onclick={() => (komootDisplayMode = "embed")}
-            >Komoot-Embed</button>
-            <button
-              class:active={komootDisplayMode === "local"}
-              type="button"
-              aria-pressed={komootDisplayMode === "local"}
-              onclick={() => (komootDisplayMode = "local")}
-            >Lokale Screenshots</button>
-          </div>
-        {/if}
-
-        {#if tourEmbedUrl && komootDisplayMode === "embed" && !komootPreview}
-          <div class="komoot-tour-embed">
+        {#if tourEmbedUrl || tour.hasKomootMap || tour.hasElevationProfile}
+          <div class="komoot-media">
             <div class="section-title">
               <div>
-                <p class="eyebrow">Öffentliche Komoot-Daten</p>
+                <p class="eyebrow">Komoot</p>
                 <h2>Karte und Höhenprofil</h2>
               </div>
             </div>
-            <iframe
-              class="komoot-embed"
-              src={tourEmbedUrl}
-              title="Komoot-Karte und Höhenprofil"
-              loading="lazy"
-              referrerpolicy="strict-origin-when-cross-origin"
-              allow="fullscreen"
-            ></iframe>
-            <p class="muted">Dieser offizielle Embed wird direkt von Komoot geladen; die Bilder werden nicht lokal gespeichert.</p>
-          </div>
-        {/if}
-
-        {#if (tour.hasKomootMap || tour.hasElevationProfile) &&
-          (!tourEmbedUrl || komootDisplayMode === "local")}
-          <div class="preview-images">
-            {#if tour.hasKomootMap}
-              <figure>
-                <img src={`/api/tours/${encodeURIComponent(selectedAlbum.id)}/images/komoot-map?v=${imageVersion}`} alt="Komoot-Kartenvorschau" />
-                <figcaption>Komoot-Karte</figcaption>
-              </figure>
+            {#if tourEmbedUrl && (tour.hasKomootMap || tour.hasElevationProfile)}
+              <div class="komoot-view-toggle" role="group" aria-label="Komoot-Ansicht auswählen">
+                <button
+                  class:active={komootDisplayMode === "embed"}
+                  type="button"
+                  aria-pressed={komootDisplayMode === "embed"}
+                  onclick={() => (komootDisplayMode = "embed")}
+                >Komoot online</button>
+                <button
+                  class:active={komootDisplayMode === "local"}
+                  type="button"
+                  aria-pressed={komootDisplayMode === "local"}
+                  onclick={() => (komootDisplayMode = "local")}
+                >Lokale Bilder</button>
+              </div>
             {/if}
-            {#if tour.hasElevationProfile}
-              <figure>
-                <img src={`/api/tours/${encodeURIComponent(selectedAlbum.id)}/images/elevation?v=${imageVersion}`} alt="Höhenprofil" />
-                <figcaption>Höhenprofil</figcaption>
-              </figure>
+
+            {#if tourEmbedUrl && komootDisplayMode === "embed" && !komootPreview}
+              <div class="komoot-tour-embed">
+                <iframe
+                  class="komoot-embed"
+                  src={tourEmbedUrl}
+                  title="Komoot-Karte und Höhenprofil"
+                  loading="lazy"
+                  referrerpolicy="strict-origin-when-cross-origin"
+                  allow="fullscreen"
+                ></iframe>
+                <p class="muted">Diese Ansicht wird direkt von Komoot geladen.</p>
+              </div>
+            {/if}
+
+            {#if (tour.hasKomootMap || tour.hasElevationProfile) &&
+              (!tourEmbedUrl || komootDisplayMode === "local")}
+              <div class="preview-images">
+                {#if tour.hasKomootMap}
+                  <figure>
+                    <img src={`/api/tours/${encodeURIComponent(selectedAlbum.id)}/images/komoot-map?v=${imageVersion}`} alt="Komoot-Kartenvorschau" />
+                    <figcaption>Komoot-Karte</figcaption>
+                  </figure>
+                {/if}
+                {#if tour.hasElevationProfile}
+                  <figure>
+                    <img src={`/api/tours/${encodeURIComponent(selectedAlbum.id)}/images/elevation?v=${imageVersion}`} alt="Höhenprofil" />
+                    <figcaption>Höhenprofil</figcaption>
+                  </figure>
+                {/if}
+              </div>
             {/if}
           </div>
         {/if}

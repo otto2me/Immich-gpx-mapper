@@ -57,6 +57,10 @@ export async function captureKomootScreenshots(embedUrl: string) {
   const browser = await chromium.launch({
     executablePath,
     headless: true,
+    env: {
+      ...process.env,
+      HOME: process.env.DATA_DIR ?? "/data"
+    },
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
   });
 
