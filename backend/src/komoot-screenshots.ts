@@ -46,6 +46,21 @@ function findChromiumExecutable() {
   return candidates.find(existsSync);
 }
 
+async function waitForVisibleInAnyFrame(
+  page: import("playwright-core").Page,
+  selector: string
+) {
+  const deadline = Date.now() + screenshotTimeoutMs;
+  while (Date.now() < deadline) {
+    for (const frame of page.frames()) {
+      const locator = frame.locator(selector).first();
+      if (await locator.isVisible().catch(() => false)) return locator;
+    }
+    await page.waitForTimeout(100);
+  }
+  throw new Error(`Kein sichtbares Element ${selector} in Browser-Frames gefunden`);
+}
+
 export async function captureKomootScreenshots(embedUrl: string) {
   const executablePath = findChromiumExecutable();
   if (!executablePath) {
@@ -85,10 +100,8 @@ export async function captureKomootScreenshots(embedUrl: string) {
       timeout: screenshotTimeoutMs
     });
 
-    const mapCanvas = page.locator("canvas.maplibregl-canvas").first();
-    const elevationProfile = page.locator("[data-activity-profile-card]");
-    await mapCanvas.waitFor({ state: "visible", timeout: screenshotTimeoutMs });
-    await elevationProfile.waitFor({ state: "visible", timeout: screenshotTimeoutMs });
+    const mapCanvas = await waitForVisibleInAnyFrame(page, "canvas.maplibregl-canvas");
+    const elevationProfile = await waitForVisibleInAnyFrame(page, "[data-activity-profile-card]");
     await page.waitForTimeout(1200);
 
     const mapImage = await mapCanvas
