@@ -5,14 +5,27 @@
     src,
     albumId,
     markers = [],
-    immichWebUrl
-  }: { src: string; albumId: string; markers?: MapMarker[]; immichWebUrl: string | null } = $props();
+    immichWebUrl,
+    focusAssetId,
+    focusRequestId
+  }: {
+    src: string;
+    albumId: string;
+    markers?: MapMarker[];
+    immichWebUrl: string | null;
+    focusAssetId: string | null;
+    focusRequestId: number;
+  } = $props();
   let element: HTMLDivElement;
   let error = $state("");
+  let activeMap = $state.raw<import("leaflet").Map | null>(null);
+  let photoMarkerLayers = $state.raw<Map<string, import("leaflet").CircleMarker>>(new Map());
 
   $effect(() => {
     const currentSrc = src;
     const currentMarkers = markers;
+    const currentAlbumId = albumId;
+    const currentImmichWebUrl = immichWebUrl;
     let disposed = false;
     let map: import("leaflet").Map | undefined;
     error = "";
@@ -55,6 +68,7 @@
         opacity: 0.9
       }).addTo(map);
 
+      const markerLayers = new Map<string, import("leaflet").CircleMarker>();
       for (const photo of photoMarkers) {
         const popup = document.createElement("div");
         popup.className = "photo-popup";
@@ -62,9 +76,9 @@
         image.src = `/api/assets/${encodeURIComponent(photo.id)}/thumbnail`;
         image.alt = "Immich-Foto an diesem Standort";
         image.loading = "lazy";
-        if (immichWebUrl) {
+        if (currentImmichWebUrl) {
           const link = document.createElement("a");
-          link.href = `${immichWebUrl}/albums/${encodeURIComponent(albumId)}/photos/${encodeURIComponent(photo.id)}`;
+          link.href = `${currentImmichWebUrl}/albums/${encodeURIComponent(currentAlbumId)}/photos/${encodeURIComponent(photo.id)}`;
           link.target = "_blank";
           link.rel = "noreferrer";
           link.title = "Foto in Immich öffnen";
@@ -83,7 +97,7 @@
           popup.append(caption);
         }
 
-        leaflet.circleMarker([photo.lat, photo.lon], {
+        const markerLayer = leaflet.circleMarker([photo.lat, photo.lon], {
           radius: 7,
           color: "#fff",
           weight: 2,
@@ -96,7 +110,11 @@
           autoPanPadding: [32, 40],
           keepInView: true
         });
+        markerLayers.set(photo.id, markerLayer);
       }
+
+      activeMap = map;
+      photoMarkerLayers = markerLayers;
 
       map.fitBounds(leaflet.latLngBounds([
         ...points,
@@ -112,8 +130,23 @@
 
     return () => {
       disposed = true;
+      if (activeMap === map) {
+        activeMap = null;
+        photoMarkerLayers = new Map();
+      }
       map?.remove();
     };
+  });
+
+  $effect(() => {
+    const requestedAssetId = focusAssetId;
+    const requestId = focusRequestId;
+    const map = activeMap;
+    const marker = requestedAssetId ? photoMarkerLayers.get(requestedAssetId) : undefined;
+    if (!requestId || !map || !marker) return;
+
+    map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), 15), { duration: 0.45 });
+    marker.openPopup();
   });
 </script>
 

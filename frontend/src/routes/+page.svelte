@@ -28,6 +28,8 @@
   let albumAssetsError = $state("");
   let photoMarkers = $state<MapMarker[]>([]);
   let photoMapError = $state("");
+  let mapFocusAssetId = $state<string | null>(null);
+  let mapFocusRequestId = $state(0);
   let authenticated = $state(false);
   let loading = $state(true);
   let busy = $state(false);
@@ -138,6 +140,17 @@
   function immichAssetUrl(albumId: string, assetId: string) {
     if (!immichWebUrl) return null;
     return `${immichWebUrl}/albums/${encodeURIComponent(albumId)}/photos/${encodeURIComponent(assetId)}`;
+  }
+
+  function hasPhotoMarker(assetId: string) {
+    return photoMarkers.some((marker) => marker.id === assetId);
+  }
+
+  function showPhotoOnMap(assetId: string) {
+    if (!tour.hasGpx || !hasPhotoMarker(assetId)) return;
+    mapFocusAssetId = assetId;
+    mapFocusRequestId += 1;
+    document.querySelector(".map-panel .map")?.scrollIntoView({ behavior: "auto", block: "center" });
   }
 
   async function initialize() {
@@ -411,23 +424,30 @@
       {:else if albumAssets.length}
         <div class="album-photo-grid">
           {#each albumAssets as asset (asset.id)}
-            {#if immichWebUrl}
-              <a
-                class="album-photo"
-                href={immichAssetUrl(selectedAlbum.id, asset.id) ?? undefined}
-                target="_blank"
-                rel="noreferrer"
-                title="In Immich öffnen"
-              >
-                <img src={thumbnail(asset.id)} alt={assetTitle(asset)} loading="lazy" />
-                <span>{assetTitle(asset)}</span>
-              </a>
-            {:else}
-              <div class="album-photo">
-                <img src={thumbnail(asset.id)} alt={assetTitle(asset)} loading="lazy" />
-                <span>{assetTitle(asset)}</span>
-              </div>
-            {/if}
+            <div class="album-photo-card">
+              {#if immichWebUrl}
+                <a
+                  class="album-photo"
+                  href={immichAssetUrl(selectedAlbum.id, asset.id) ?? undefined}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="In Immich öffnen"
+                >
+                  <img src={thumbnail(asset.id)} alt={assetTitle(asset)} loading="lazy" />
+                  <span>{assetTitle(asset)}</span>
+                </a>
+              {:else}
+                <div class="album-photo">
+                  <img src={thumbnail(asset.id)} alt={assetTitle(asset)} loading="lazy" />
+                  <span>{assetTitle(asset)}</span>
+                </div>
+              {/if}
+              {#if tour.hasGpx && hasPhotoMarker(asset.id)}
+                <button class="album-photo-map" type="button" onclick={() => showPhotoOnMap(asset.id)}>
+                  ⌖ Auf Karte
+                </button>
+              {/if}
+            </div>
           {/each}
         </div>
         {#if albumAssetsHasMore}
@@ -653,6 +673,8 @@
             albumId={selectedAlbum.id}
             markers={photoMarkers}
             {immichWebUrl}
+            focusAssetId={mapFocusAssetId}
+            focusRequestId={mapFocusRequestId}
           />
           {#if photoMapError}
             <p class="muted">{photoMapError}</p>
@@ -952,6 +974,9 @@
   .album-photo { display: grid; min-width: 0; align-content: start; gap: .3rem; color: #536354; text-decoration: none; }
   .album-photo img { width: 100%; aspect-ratio: 4 / 3; border-radius: .45rem; object-fit: cover; background: #edf2eb; }
   .album-photo span { overflow: hidden; font-size: .7rem; text-overflow: ellipsis; white-space: nowrap; }
+  .album-photo-card { display: grid; min-width: 0; align-content: start; justify-items: start; gap: .25rem; }
+  .album-photo-map { display: inline-flex; min-height: 1.45rem; align-items: center; gap: .2rem; padding: .18rem .35rem; border: 0; border-radius: .35rem; background: transparent; color: #55745d; font-size: .65rem; font-weight: 650; line-height: 1.1; }
+  .album-photo-map:hover { background: #edf3eb; }
   .album-load-more { margin-top: .8rem; }
   .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
   .panel { min-width: 0; padding: clamp(1.1rem, 2.3vw, 1.7rem); border: 1px solid #e5eae3; border-radius: 1rem; background: #fff; }
