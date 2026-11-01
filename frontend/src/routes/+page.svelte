@@ -9,6 +9,7 @@
     type Album,
     type Asset,
     type Comment,
+    type MapMarker,
     type KomootPreview,
     type Tour
   } from "../lib/api.js";
@@ -18,6 +19,15 @@
   let selectedAlbum = $state<Album | null>(null);
   let tour = $state<Tour>(emptyTour());
   let comments = $state<Comment[]>([]);
+  let immichWebUrl = $state<string | null>(null);
+  let albumAssets = $state<Asset[]>([]);
+  let albumAssetsPage = $state(0);
+  let albumAssetsTotal = $state(0);
+  let albumAssetsHasMore = $state(false);
+  let albumAssetsLoading = $state(false);
+  let albumAssetsError = $state("");
+  let photoMarkers = $state<MapMarker[]>([]);
+  let photoMapError = $state("");
   let authenticated = $state(false);
   let loading = $state(true);
   let busy = $state(false);
@@ -65,6 +75,14 @@
     komootPreview = null;
     komootPreviewApplied = false;
     komootDisplayMode = "embed";
+    albumAssets = [];
+    albumAssetsPage = 0;
+    albumAssetsTotal = 0;
+    albumAssetsHasMore = false;
+    albumAssetsLoading = false;
+    albumAssetsError = "";
+    photoMarkers = [];
+    photoMapError = "";
     loading = true;
     try {
       const [album, savedTour, savedComments] = await Promise.all([
@@ -75,6 +93,11 @@
       selectedAlbum = album;
       tour = { ...emptyTour(), ...savedTour };
       comments = savedComments;
+      try {
+        photoMarkers = await api.albumMapMarkers(id);
+      } catch {
+        photoMapError = "Foto-Standorte konnten von Immich nicht geladen werden.";
+      }
     } catch (reason) {
       error = message(reason);
       selectedAlbum = null;
@@ -83,7 +106,46 @@
     }
   }
 
+  async function loadMoreAlbumAssets() {
+    const albumId = selectedAlbum?.id;
+    if (
+      !albumId || albumAssetsLoading ||
+      (albumAssetsPage > 0 && !albumAssetsHasMore)
+    ) return;
+
+    const page = albumAssetsPage + 1;
+    albumAssetsLoading = true;
+    albumAssetsError = "";
+    try {
+      const result = await api.albumAssets(albumId, page);
+      if (selectedAlbum?.id !== albumId) return;
+      albumAssets = [...albumAssets, ...result.items];
+      albumAssetsPage = result.page;
+      albumAssetsTotal = result.total;
+      albumAssetsHasMore = result.hasMore;
+    } catch (reason) {
+      albumAssetsError = message(reason);
+    } finally {
+      if (selectedAlbum?.id === albumId) albumAssetsLoading = false;
+    }
+  }
+
+  function onAlbumGalleryToggle(event: Event) {
+    const details = event.currentTarget as HTMLDetailsElement;
+    if (details.open && albumAssetsPage === 0) void loadMoreAlbumAssets();
+  }
+
+  function immichAssetUrl(albumId: string, assetId: string) {
+    if (!immichWebUrl) return null;
+    return `${immichWebUrl}/albums/${encodeURIComponent(albumId)}/photos/${encodeURIComponent(assetId)}`;
+  }
+
   async function initialize() {
+    try {
+      immichWebUrl = (await api.publicConfig()).immichWebUrl;
+    } catch {
+      immichWebUrl = null;
+    }
     try {
       authenticated = (await api.session()).authenticated;
     } catch (reason) {
@@ -334,13 +396,49 @@
       {/if}
     </section>
 
-    {#if selectedAlbum.assets?.length}
-      <section class="photo-strip" aria-label="Albumfotos">
-        {#each selectedAlbum.assets.slice(0, 8) as asset (asset.id)}
-          <img src={thumbnail(asset.id)} alt={assetTitle(asset)} loading="lazy" />
-        {/each}
-      </section>
-    {/if}
+    <details class="album-gallery" ontoggle={onAlbumGalleryToggle}>
+      <summary>
+        <span>Albumfotos</span>
+        <span class="count">{albumAssetsTotal || selectedAlbum.assetCount || 0}</span>
+      </summary>
+      {#if !immichWebUrl}
+        <p class="muted">Zum Öffnen in Immich bitte `IMMICH_WEB_URL` auf die im Browser erreichbare Immich-Adresse setzen.</p>
+      {/if}
+      {#if albumAssetsError}
+        <p class="muted">Albumfotos konnten nicht geladen werden: {albumAssetsError}</p>
+      {:else if albumAssetsLoading && albumAssets.length === 0}
+        <p class="muted">Albumfotos werden geladen ...</p>
+      {:else if albumAssets.length}
+        <div class="album-photo-grid">
+          {#each albumAssets as asset (asset.id)}
+            {#if immichWebUrl}
+              <a
+                class="album-photo"
+                href={immichAssetUrl(selectedAlbum.id, asset.id) ?? undefined}
+                target="_blank"
+                rel="noreferrer"
+                title="In Immich öffnen"
+              >
+                <img src={thumbnail(asset.id)} alt={assetTitle(asset)} loading="lazy" />
+                <span>{assetTitle(asset)}</span>
+              </a>
+            {:else}
+              <div class="album-photo">
+                <img src={thumbnail(asset.id)} alt={assetTitle(asset)} loading="lazy" />
+                <span>{assetTitle(asset)}</span>
+              </div>
+            {/if}
+          {/each}
+        </div>
+        {#if albumAssetsHasMore}
+          <button class="secondary-button album-load-more" type="button" disabled={albumAssetsLoading} onclick={loadMoreAlbumAssets}>
+            {albumAssetsLoading ? "Wird geladen ..." : "Weitere Fotos laden"}
+          </button>
+        {/if}
+      {:else if !albumAssetsLoading}
+        <p class="muted">Keine Fotos in diesem Album.</p>
+      {/if}
+    </details>
 
     <div class="detail-grid">
       <section class="panel tour-panel">
@@ -550,7 +648,19 @@
           {#if tour.hasGpx}<span class="direction-tag">GPX</span>{/if}
         </div>
         {#if tour.hasGpx}
-          <GpxMap src={`/api/tours/${encodeURIComponent(selectedAlbum.id)}/gpx`} />
+          <GpxMap
+            src={`/api/tours/${encodeURIComponent(selectedAlbum.id)}/gpx`}
+            albumId={selectedAlbum.id}
+            markers={photoMarkers}
+            {immichWebUrl}
+          />
+          {#if photoMapError}
+            <p class="muted">{photoMapError}</p>
+          {:else if photoMarkers.length}
+            <p class="muted">{photoMarkers.length} Fotos mit GPS-Position auf der Karte</p>
+          {:else}
+            <p class="muted">Keine Fotos mit GPS-Position in diesem Album.</p>
+          {/if}
         {:else}
           <div class="empty-map">
             <span class="map-icon">⌖</span>
@@ -823,7 +933,6 @@
   .komoot-embed-wrap { display: grid; gap: .4rem; color: #758174; font-size: .67rem; }
   .komoot-embed { display: block; width: 100%; min-height: 700px; border: 0; border-radius: .6rem; background: #f4f6f2; }
   .komoot-tour-embed { display: grid; gap: .5rem; margin-top: 1.5rem; }
-  .komoot-tour-embed .section-title { margin-bottom: .35rem; }
   .komoot-tour-embed > .muted { margin: 0; }
   .komoot-view-toggle { display: flex; width: fit-content; gap: .25rem; margin: 1rem 0 0; padding: .25rem; border-radius: .7rem; background: #edf2eb; }
   .komoot-view-toggle button { min-height: 2.2rem; padding: .45rem .7rem; border: 0; border-radius: .5rem; background: transparent; color: #647064; font-size: .73rem; font-weight: 700; }
@@ -834,8 +943,16 @@
   .small-button { padding: .55rem .8rem; font-size: .76rem; }
   .primary-button:disabled, .small-button:disabled { cursor: not-allowed; opacity: .55; }
   .quiet-button { padding: .5rem .7rem; border: 0; background: none; color: #607560; font-size: .8rem; }
-  .photo-strip { display: grid; grid-template-columns: repeat(8, 1fr); gap: .45rem; margin-bottom: 1.35rem; overflow: hidden; border-radius: .9rem; }
-  .photo-strip img { width: 100%; height: 92px; object-fit: cover; background: #e6ebe4; }
+  .album-gallery { margin: 0 0 1.35rem; padding: .8rem 0; border-top: 1px solid #e6ebe4; border-bottom: 1px solid #e6ebe4; }
+  .album-gallery summary { display: flex; min-height: 2rem; align-items: center; justify-content: space-between; gap: .75rem; color: #405343; cursor: pointer; font-size: .9rem; font-weight: 750; list-style: none; }
+  .album-gallery summary::-webkit-details-marker { display: none; }
+  .album-gallery summary:after { content: "+"; color: #65846a; font-size: 1.2rem; }
+  .album-gallery[open] summary:after { content: "−"; }
+  .album-photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: .7rem; margin-top: .85rem; }
+  .album-photo { display: grid; min-width: 0; align-content: start; gap: .3rem; color: #536354; text-decoration: none; }
+  .album-photo img { width: 100%; aspect-ratio: 4 / 3; border-radius: .45rem; object-fit: cover; background: #edf2eb; }
+  .album-photo span { overflow: hidden; font-size: .7rem; text-overflow: ellipsis; white-space: nowrap; }
+  .album-load-more { margin-top: .8rem; }
   .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
   .panel { min-width: 0; padding: clamp(1.1rem, 2.3vw, 1.7rem); border: 1px solid #e5eae3; border-radius: 1rem; background: #fff; }
   .section-title { align-items: center; margin-bottom: 1.25rem; }
@@ -881,7 +998,6 @@
     .album-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .detail-grid { grid-template-columns: 1fr; }
     .map-panel, .comments-panel { grid-column: 1; grid-row: auto; }
-    .photo-strip { grid-template-columns: repeat(4, 1fr); }
   }
   @media (max-width: 560px) {
     .topbar { height: auto; min-height: 68px; flex-wrap: wrap; gap: .75rem; padding: .8rem 1rem; }
@@ -902,8 +1018,6 @@
     .library-heading { align-items: start; flex-direction: column; }
     .search-wrap { width: 100%; }
     .album-heading { align-items: start; flex-direction: column; }
-    .photo-strip { grid-template-columns: repeat(4, 1fr); }
-    .photo-strip img { height: 66px; }
     .form-row, .form-row:has(select) { grid-template-columns: 1fr; }
     .komoot-embed { min-height: 560px; }
     .komoot-map-preview { grid-row: 1; }
