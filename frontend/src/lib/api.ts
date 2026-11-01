@@ -14,6 +14,22 @@ export type Asset = {
   fileCreatedAt?: string;
 };
 
+export type MapMarker = {
+  id: string;
+  lat: number;
+  lon: number;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+};
+
+export type AlbumAssetPage = {
+  items: Asset[];
+  total: number;
+  page: number;
+  hasMore: boolean;
+};
+
 export type Tour = {
   id?: string;
   activityType: "hike" | "bike";
@@ -88,6 +104,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  publicConfig: () => request<{ immichWebUrl: string | null }>("/api/config"),
   session: () => request<{ authenticated: boolean }>("/api/auth/session"),
   login: (password: string) =>
     request<{ authenticated: boolean }>("/api/auth/login", {
@@ -99,6 +116,10 @@ export const api = {
   albums: () => request<Album[]>("/api/albums"),
   album: (id: string) =>
     request<Album>(`/api/albums/${encodeURIComponent(id)}`),
+  albumMapMarkers: (id: string) =>
+    request<MapMarker[]>(`/api/albums/${encodeURIComponent(id)}/map-markers`),
+  albumAssets: (id: string, page: number) =>
+    request<AlbumAssetPage>(`/api/albums/${encodeURIComponent(id)}/assets?page=${page}`),
   tour: (id: string) =>
     request<Tour | null>(`/api/tours/${encodeURIComponent(id)}`),
   saveTour: (id: string, tour: Tour) =>

@@ -1,18 +1,26 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import type { MapMarker } from "./api.js";
 
-  let { src }: { src: string } = $props();
+  let {
+    src,
+    albumId,
+    markers = [],
+    immichWebUrl
+  }: { src: string; albumId: string; markers?: MapMarker[]; immichWebUrl: string | null } = $props();
   let element: HTMLDivElement;
   let error = $state("");
 
-  onMount(() => {
+  $effect(() => {
+    const currentSrc = src;
+    const currentMarkers = markers;
     let disposed = false;
     let map: import("leaflet").Map | undefined;
+    error = "";
 
     async function renderTrack() {
       const [leaflet, response] = await Promise.all([
         import("leaflet"),
-        fetch(src)
+        fetch(currentSrc)
       ]);
       if (!response.ok) throw new Error("GPX-Track konnte nicht geladen werden");
       const xmlText = await response.text();
@@ -31,6 +39,11 @@
       if (!points.length) throw new Error("Der GPX-Track enthält keine Wegpunkte");
       if (disposed) return;
 
+      const photoMarkers = currentMarkers.filter((marker) =>
+        Number.isFinite(marker.lat) && Number.isFinite(marker.lon) &&
+        marker.lat >= -90 && marker.lat <= 90 && marker.lon >= -180 && marker.lon <= 180
+      );
+
       map = leaflet.map(element, { scrollWheelZoom: false });
       leaflet.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
@@ -41,7 +54,54 @@
         weight: 5,
         opacity: 0.9
       }).addTo(map);
-      map.fitBounds(track.getBounds(), { padding: [24, 24] });
+
+      for (const photo of photoMarkers) {
+        const popup = document.createElement("div");
+        popup.className = "photo-popup";
+        const image = document.createElement("img");
+        image.src = `/api/assets/${encodeURIComponent(photo.id)}/thumbnail`;
+        image.alt = "Immich-Foto an diesem Standort";
+        image.loading = "lazy";
+        if (immichWebUrl) {
+          const link = document.createElement("a");
+          link.href = `${immichWebUrl}/albums/${encodeURIComponent(albumId)}/photos/${encodeURIComponent(photo.id)}`;
+          link.target = "_blank";
+          link.rel = "noreferrer";
+          link.title = "Foto in Immich öffnen";
+          link.append(image);
+          popup.append(link);
+        } else {
+          popup.append(image);
+        }
+
+        const location = [photo.city, photo.state, photo.country]
+          .filter((part): part is string => Boolean(part))
+          .join(", ");
+        if (location) {
+          const caption = document.createElement("p");
+          caption.textContent = location;
+          popup.append(caption);
+        }
+
+        leaflet.circleMarker([photo.lat, photo.lon], {
+          radius: 7,
+          color: "#fff",
+          weight: 2,
+          fillColor: "#d16d3b",
+          fillOpacity: 1
+        }).addTo(map).bindPopup(popup, {
+          maxWidth: 240,
+          maxHeight: 220,
+          autoPan: true,
+          autoPanPadding: [32, 40],
+          keepInView: true
+        });
+      }
+
+      map.fitBounds(leaflet.latLngBounds([
+        ...points,
+        ...photoMarkers.map((photo) => leaflet.latLng(photo.lat, photo.lon))
+      ]), { padding: [24, 24] });
     }
 
     void renderTrack().catch((reason: unknown) => {
@@ -70,5 +130,17 @@
 
   .map-error {
     color: #a53d32;
+  }
+
+  :global(.photo-popup img) {
+    display: block;
+    width: 220px;
+    height: 160px;
+    max-width: 220px;
+    object-fit: cover;
+  }
+
+  :global(.photo-popup p) {
+    margin: .4rem 0 0;
   }
 </style>

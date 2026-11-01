@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     environment:
       IMMICH_API_URL: ${IMMICH_API_URL:-http://immich-server:2283}
+      IMMICH_WEB_URL: ${IMMICH_WEB_URL:-}
       IMMICH_API_KEY: ${IMMICH_API_KEY:?Set IMMICH_API_KEY in .env}
       APP_PASSWORD: ${APP_PASSWORD:?Set APP_PASSWORD in .env}
       DATA_DIR: /data

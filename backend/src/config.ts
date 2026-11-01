@@ -15,6 +15,7 @@ type FileConfig = {
 
 export type AppConfig = {
   immichApiUrl: string;
+  immichWebUrl: string | null;
   immichApiKey: string;
   appPassword: string;
   dataDir: string;
@@ -53,6 +54,21 @@ function readFileConfig(configFile: string): FileConfig {
   };
 }
 
+function readImmichWebUrl() {
+  const value = process.env.IMMICH_WEB_URL?.trim();
+  if (!value) return null;
+
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error();
+    }
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    throw new Error("IMMICH_WEB_URL must be an absolute HTTP(S) URL");
+  }
+}
+
 export function loadConfig(): AppConfig {
   const configFile = process.env.CONFIG_FILE ?? "/data/config.json";
   const fileConfig = readFileConfig(configFile);
@@ -71,6 +87,7 @@ export function loadConfig(): AppConfig {
       process.env.IMMICH_API_URL ??
       fileConfig.immichApiUrl ??
       "http://immich-server:2283",
+    immichWebUrl: readImmichWebUrl(),
     immichApiKey: process.env.IMMICH_API_KEY ?? fileConfig.immichApiKey ?? "",
     appPassword,
     dataDir: process.env.DATA_DIR ?? "/data",

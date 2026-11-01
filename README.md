@@ -45,7 +45,10 @@ auf ein beschreibbares Verzeichnis gesetzt werden.
 2. `docker-compose.example.yml` als Service-Ausschnitt in die bestehende
    Immich-Compose-Datei übernehmen (oder separat mit `-f` verwenden).
 3. `.env.example` nach `.env` kopieren und `IMMICH_API_KEY` sowie ein eigenes,
-   zufälliges `APP_PASSWORD` setzen. `.env` niemals committen.
+   zufälliges `APP_PASSWORD` setzen. Für Foto-Links aus dem Browser außerdem
+   `IMMICH_WEB_URL` auf die für Browser erreichbare Immich-Adresse setzen
+   (z. B. `https://immich.example.org` oder `http://NAS-IP:8212`). `.env`
+   niemals committen.
 4. Falls nötig `IMMICH_API_URL` und `IMMICH_DOCKER_NETWORK` auf die Namen des
    eigenen Immich-Stacks anpassen. Das externe Netzwerk muss bereits existieren.
 5. Den Datenordner `immich-gpx-mapper-data` anlegen und bei Bedarf
@@ -106,6 +109,11 @@ curl http://127.0.0.1:3000/api/health
    hochzuladen und Kommentare zu schreiben.
 4. GPX-Dateien werden auf der OpenStreetMap-Karte dargestellt. Für die
    Kartendarstellung benötigt der Browser Zugriff auf die OpenStreetMap-Kacheln.
+
+Georeferenzierte Fotos aus dem Immich-Album erscheinen als anklickbare Marker
+auf der GPX-Karte. Die Albumfotos lassen sich über **Albumfotos** ein- und
+ausklappen. Ein Klick öffnet das Foto im Immich-Album-Viewer; dafür muss
+`IMMICH_WEB_URL` auf eine vom Browser erreichbare Immich-Adresse zeigen.
 
 Die Tourart (Wanderung oder Fahrradtour) lässt sich beim Bearbeiten eines Albums
 festlegen. Sie wird gemeinsam mit den übrigen Tourdaten gespeichert.

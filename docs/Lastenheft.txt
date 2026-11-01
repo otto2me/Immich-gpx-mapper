@@ -8,10 +8,13 @@
 • Erweiterung dieser Alben mit zusätzlichen Daten
 ○ Komot link
 ○ GPX Anhang
+○ GPX-Track, Komoot-Karte und Höhenprofil derselben Tour zuordnen und gemeinsam beim Immich-Album anzeigen
+○ Georeferenzierte Fotos des Immich-Albums als anklickbare Vorschaubilder an ihren GPS-Positionen auf der GPX-Karte anzeigen
+○ Albumfotos in einer ein- und ausklappbaren Galerie anzeigen und per Klick im Immich-Album-Viewer öffnen
 ○ Beschreibung
 ○ Kommentare
 ○ Richtung der Wanderung
-○ Komot Bild der Karte und Höhenunterschied
+○ Komoot-Bild der Karte und Höhenprofil zum GPX-Track speichern und gemeinsam mit dem Track anzeigen
 • Leaflet-GPX prüfen
 • Nginx-Webserver
 • Docker compose in bestehendes immich compose einbinden

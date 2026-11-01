@@ -22,6 +22,10 @@ await registerImmichRoutes(app, config);
 await registerTourRoutes(app, database, config);
 await registerKomootRoutes(app);
 
+app.get("/api/config", async () => ({
+  immichWebUrl: config.immichWebUrl
+}));
+
 app.get("/api/health", async () => ({
   status: "ok",
   immichConfigured: config.immichApiKey.length > 0,
