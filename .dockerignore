@@ -1,0 +1,9 @@
+.git
+.github
+.vscode
+node_modules
+**/node_modules
+**/build
+**/dist
+immich-gpx-mapper-data
+.env

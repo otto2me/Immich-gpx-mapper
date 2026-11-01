@@ -1,0 +1,910 @@
+<script lang="ts">
+  import { onMount } from "svelte";
+  import "leaflet/dist/leaflet.css";
+  import GpxMap from "../lib/GpxMap.svelte";
+  import {
+    api,
+    emptyTour,
+    komootEmbedUrl,
+    type Album,
+    type Asset,
+    type Comment,
+    type KomootPreview,
+    type Tour
+  } from "../lib/api.js";
+
+  const appVersion = __APP_VERSION__;
+  let albums = $state<Album[]>([]);
+  let selectedAlbum = $state<Album | null>(null);
+  let tour = $state<Tour>(emptyTour());
+  let comments = $state<Comment[]>([]);
+  let authenticated = $state(false);
+  let loading = $state(true);
+  let busy = $state(false);
+  let error = $state("");
+  let notice = $state("");
+  let search = $state("");
+  let password = $state("");
+  let author = $state("");
+  let commentText = $state("");
+  let imageVersion = $state(0);
+  let komootDisplayMode = $state<"embed" | "local">("embed");
+  let komootPreview = $state<KomootPreview | null>(null);
+  let loadingKomoot = $state(false);
+  let komootPreviewApplied = $state(false);
+  const previewEmbedUrl = $derived(
+    komootPreview ? komootEmbedUrl(tour.komootLink) : null
+  );
+  const tourEmbedUrl = $derived(komootEmbedUrl(tour.komootLink));
+
+  const filteredAlbums = $derived(
+    albums.filter((album) =>
+      album.albumName.toLocaleLowerCase().includes(search.toLocaleLowerCase())
+    )
+  );
+
+  function message(reason: unknown) {
+    return reason instanceof Error ? reason.message : "Ein unbekannter Fehler ist aufgetreten";
+  }
+
+  async function loadAlbums() {
+    error = "";
+    loading = true;
+    try {
+      albums = await api.albums();
+    } catch (reason) {
+      error = message(reason);
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function loadAlbum(id: string) {
+    error = "";
+    notice = "";
+    komootPreview = null;
+    komootPreviewApplied = false;
+    komootDisplayMode = "embed";
+    loading = true;
+    try {
+      const [album, savedTour, savedComments] = await Promise.all([
+        api.album(id),
+        api.tour(id),
+        api.comments(id)
+      ]);
+      selectedAlbum = album;
+      tour = { ...emptyTour(), ...savedTour };
+      comments = savedComments;
+    } catch (reason) {
+      error = message(reason);
+      selectedAlbum = null;
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function initialize() {
+    try {
+      authenticated = (await api.session()).authenticated;
+    } catch (reason) {
+      error = message(reason);
+    }
+    const albumId = new URLSearchParams(location.search).get("album");
+    if (albumId) {
+      await loadAlbum(albumId);
+    } else {
+      await loadAlbums();
+    }
+  }
+
+  function syncFromLocation() {
+    const albumId = new URLSearchParams(location.search).get("album");
+    if (albumId) void loadAlbum(albumId);
+    else {
+      selectedAlbum = null;
+      void loadAlbums();
+    }
+  }
+
+  onMount(() => {
+    void initialize();
+    window.addEventListener("popstate", syncFromLocation);
+    return () => window.removeEventListener("popstate", syncFromLocation);
+  });
+
+  async function openAlbum(album: Album) {
+    history.pushState(null, "", `/?album=${encodeURIComponent(album.id)}`);
+    await loadAlbum(album.id);
+  }
+
+  function backToAlbums() {
+    history.pushState(null, "", "/");
+    selectedAlbum = null;
+    void loadAlbums();
+  }
+
+  async function login(event: SubmitEvent) {
+    event.preventDefault();
+    busy = true;
+    error = "";
+    try {
+      await api.login(password);
+      authenticated = true;
+      password = "";
+      notice = "Du bist angemeldet und kannst Tourdaten bearbeiten.";
+    } catch (reason) {
+      error = message(reason);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function logout() {
+    try {
+      await api.logout();
+      authenticated = false;
+      notice = "Du wurdest abgemeldet.";
+    } catch (reason) {
+      error = message(reason);
+    }
+  }
+
+  async function saveTour(event: SubmitEvent) {
+    event.preventDefault();
+    if (!selectedAlbum) return;
+    busy = true;
+    error = "";
+    try {
+      const saved = await api.saveTour(selectedAlbum.id, tour);
+      tour = { ...emptyTour(), ...saved };
+      notice = "Tourdaten gespeichert.";
+    } catch (reason) {
+      error = message(reason);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function loadKomootPreview() {
+    if (!tour.komootLink.trim()) return;
+    loadingKomoot = true;
+    error = "";
+    notice = "";
+    komootPreview = null;
+    komootPreviewApplied = false;
+    try {
+      komootPreview = await api.komootPreview(tour.komootLink);
+    } catch (reason) {
+      error = message(reason);
+    } finally {
+      loadingKomoot = false;
+    }
+  }
+
+  async function saveKomootScreenshots() {
+    if (!selectedAlbum || !tour.komootLink.trim()) return;
+    busy = true;
+    error = "";
+    notice = "";
+    try {
+      const saved = await api.saveTour(selectedAlbum.id, tour);
+      const captured = await api.captureKomootScreenshots(
+        selectedAlbum.id,
+        saved.komootLink
+      );
+      tour = { ...emptyTour(), ...captured };
+      imageVersion += 1;
+      komootDisplayMode = "local";
+      komootPreview = null;
+      komootPreviewApplied = false;
+      notice = "Komoot-Karte und Höhenprofil wurden als PNG im Datenverzeichnis gespeichert.";
+    } catch (reason) {
+      error = message(reason);
+    } finally {
+      busy = false;
+    }
+  }
+
+  function clearKomootPreview() {
+    komootPreview = null;
+    komootPreviewApplied = false;
+    komootDisplayMode = "embed";
+  }
+
+  function applyKomootPreview() {
+    if (!komootPreview) return;
+    tour = {
+      ...tour,
+      ...(komootPreview.activityType ? { activityType: komootPreview.activityType } : {}),
+      ...(komootPreview.distanceKm !== null ? { distanceKm: komootPreview.distanceKm } : {}),
+      ...(komootPreview.elevationGainM !== null
+        ? { elevationGainM: komootPreview.elevationGainM }
+        : {})
+    };
+    notice = "Öffentlich sichtbare Komoot-Daten ins Formular übernommen. Prüfe sie und speichere anschließend.";
+    komootPreviewApplied = true;
+  }
+
+  async function uploadFile(kind: "gpx" | "komoot-map" | "elevation", file?: File) {
+    if (!selectedAlbum || !file) return;
+    busy = true;
+    error = "";
+    try {
+      await api.upload(selectedAlbum.id, kind, file);
+      const refreshed = await api.tour(selectedAlbum.id);
+      tour = { ...emptyTour(), ...refreshed };
+      imageVersion += 1;
+      notice = kind === "gpx" ? "GPX-Track hochgeladen." : "Bild hochgeladen.";
+    } catch (reason) {
+      error = message(reason);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function addComment(event: SubmitEvent) {
+    event.preventDefault();
+    if (!selectedAlbum || !commentText.trim()) return;
+    busy = true;
+    error = "";
+    try {
+      const comment = await api.addComment(selectedAlbum.id, author, commentText);
+      comments = [...comments, comment];
+      commentText = "";
+    } catch (reason) {
+      error = message(reason);
+    } finally {
+      busy = false;
+    }
+  }
+
+  function thumbnail(assetId: string) {
+    return `/api/assets/${encodeURIComponent(assetId)}/thumbnail`;
+  }
+
+  function assetTitle(asset: Asset) {
+    return asset.originalFileName ?? "Immich-Foto";
+  }
+</script>
+
+<svelte:head>
+  <title>Immich GPX Mapper</title>
+  <meta
+    name="description"
+    content="Tour-Informationen und GPX-Tracks zu Immich-Alben"
+  />
+</svelte:head>
+
+<header class="topbar">
+  <a class="brand" href="/" onclick={(event) => { event.preventDefault(); backToAlbums(); }}>
+    <span class="brand-mark">↗</span>
+    <span>Immich <strong>GPX Mapper</strong></span>
+  </a>
+  <div class="auth">
+    {#if authenticated}
+      <span class="auth-state"><span class="dot"></span> Bearbeitungsmodus</span>
+      <button class="quiet-button" onclick={logout}>Abmelden</button>
+    {:else}
+      <form class="login-form" onsubmit={login}>
+        <label class="sr-only" for="app-password">App-Passwort</label>
+        <input
+          id="app-password"
+          type="password"
+          placeholder="App-Passwort"
+          autocomplete="current-password"
+          bind:value={password}
+        />
+        <button class="small-button" type="submit" disabled={busy || !password}>
+          Anmelden
+        </button>
+      </form>
+    {/if}
+  </div>
+</header>
+
+<main>
+  {#if error}
+    <div class="alert error-alert" role="alert">
+      <span>{error}</span>
+      <button aria-label="Meldung schließen" onclick={() => (error = "")}>×</button>
+    </div>
+  {/if}
+  {#if notice}
+    <div class="alert notice-alert" role="status">
+      <span>{notice}</span>
+      <button aria-label="Meldung schließen" onclick={() => (notice = "")}>×</button>
+    </div>
+  {/if}
+
+  {#if selectedAlbum}
+    <button class="back-link" onclick={backToAlbums}>← Alle Alben</button>
+    <section class="album-heading">
+      <div>
+        <p class="eyebrow">Immich-Album</p>
+        <h1>{selectedAlbum.albumName}</h1>
+        <p class="muted">
+          {selectedAlbum.assetCount ?? selectedAlbum.assets?.length ?? 0} Fotos und Videos
+          {#if selectedAlbum.description} · {selectedAlbum.description}{/if}
+        </p>
+      </div>
+      {#if tour.komootLink}
+        <a class="komoot-button" href={tour.komootLink} target="_blank" rel="noreferrer">
+          Tour in Komoot öffnen ↗
+        </a>
+      {/if}
+    </section>
+
+    {#if selectedAlbum.assets?.length}
+      <section class="photo-strip" aria-label="Albumfotos">
+        {#each selectedAlbum.assets.slice(0, 8) as asset (asset.id)}
+          <img src={thumbnail(asset.id)} alt={assetTitle(asset)} loading="lazy" />
+        {/each}
+      </section>
+    {/if}
+
+    <div class="detail-grid">
+      <section class="panel tour-panel">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Tourinformationen</p>
+            <h2>Deine Tour</h2>
+          </div>
+          {#if tour.direction}
+            <span class="direction-tag">
+              {tour.direction === "forward" ? "Hinweg" : tour.direction === "reverse" ? "Rückweg" : tour.direction}
+            </span>
+          {/if}
+        </div>
+
+        {#if authenticated}
+          <form class="tour-form" onsubmit={saveTour}>
+            <label>
+              Komoot-Link
+              <input
+                type="url"
+                placeholder="https://www.komoot.com/tour/..."
+                bind:value={tour.komootLink}
+                oninput={clearKomootPreview}
+              />
+            </label>
+            <div class="komoot-import">
+              <button
+                class="secondary-button"
+                type="button"
+                disabled={loadingKomoot || busy || !tour.komootLink.trim()}
+                onclick={loadKomootPreview}
+              >
+                {loadingKomoot ? "Komoot-Seite wird gelesen ..." : "Daten aus Komoot lesen"}
+              </button>
+              <p class="muted">
+                Liest öffentlich sichtbare Angaben. Der offizielle Komoot-Embed zeigt Karte und Höhenprofil direkt von Komoot.
+              </p>
+              {#if komootPreview}
+                <div class="komoot-preview">
+                  <div class="preview-copy">
+                    <p class="eyebrow">
+                      {komootPreviewApplied ? "Werte übernommen · noch nicht gespeichert" : "Vorschau · noch nicht gespeichert"}
+                    </p>
+                    <strong>{komootPreview.title || "Komoot-Tour"}</strong>
+                    {#if komootPreview.description}
+                      <p>{komootPreview.description}</p>
+                    {/if}
+                    <div class="preview-facts">
+                      {#if komootPreview.activityType}
+                        <span>{komootPreview.activityType === "bike" ? "Fahrradtour" : "Wanderung"}</span>
+                      {/if}
+                      {#if komootPreview.distanceKm !== null}
+                        <span>{komootPreview.distanceKm} km</span>
+                      {/if}
+                      {#if komootPreview.elevationGainM !== null}
+                        <span>{komootPreview.elevationGainM} Höhenmeter</span>
+                      {/if}
+                    </div>
+                    {#if komootPreview.elevationGainM === null}
+                      <p class="preview-note">Höhenmeter waren in den öffentlichen Seitendaten nicht verfügbar.</p>
+                    {/if}
+                    <p class="preview-note">Karte und Höhenprofil werden direkt von Komoot geladen und nicht als Bilddateien gespeichert.</p>
+                    <button class="primary-button" type="button" disabled={komootPreviewApplied} onclick={applyKomootPreview}>
+                      {komootPreviewApplied ? "Werte übernommen" : "Gefundene Werte übernehmen"}
+                    </button>
+                    <button
+                      class="secondary-button"
+                      type="button"
+                      disabled={busy || !tour.komootLink.trim()}
+                      onclick={saveKomootScreenshots}
+                    >
+                      {busy ? "Screenshots werden gespeichert ..." : "Karte und Höhenprofil lokal speichern"}
+                    </button>
+                    <p class="preview-note">Speichert zuerst die Tourdaten und legt danach beide Screenshots im Docker-Datenverzeichnis ab.</p>
+                  </div>
+                  {#if previewEmbedUrl}
+                    <div class="komoot-embed-wrap">
+                      <iframe
+                        class="komoot-embed"
+                        src={previewEmbedUrl}
+                        title="Komoot-Karte und Höhenprofil"
+                        loading="lazy"
+                        referrerpolicy="strict-origin-when-cross-origin"
+                        allow="fullscreen"
+                      ></iframe>
+                      <span>Karte und Höhenprofil · offizieller Komoot-Embed</span>
+                    </div>
+                  {:else if komootPreview.mapImageUrl}
+                    <a
+                      class="komoot-map-preview"
+                      href={komootPreview.mapImageUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <img src={komootPreview.mapImageUrl} alt="Öffentliche Komoot-Kartenvorschau" />
+                      <span>Öffentliche Kartenvorschau · bei Komoot öffnen</span>
+                    </a>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+            <div class="form-row">
+              <label>
+                Tourart
+                <select bind:value={tour.activityType}>
+                  <option value="hike">Wanderung</option>
+                  <option value="bike">Fahrradtour</option>
+                </select>
+              </label>
+              <label>
+                {tour.activityType === "bike" ? "Fahrtrichtung" : "Wanderrichtung"}
+                <select bind:value={tour.direction}>
+                  <option value="">Nicht angegeben</option>
+                  <option value="forward">Hinweg</option>
+                  <option value="reverse">Rückweg</option>
+                </select>
+              </label>
+              <label>
+                Distanz (km)
+                <input type="number" min="0" step="0.1" bind:value={tour.distanceKm} />
+              </label>
+              <label>
+                Höhenmeter
+                <input type="number" min="0" step="1" bind:value={tour.elevationGainM} />
+              </label>
+            </div>
+            <label>
+              Beschreibung
+              <textarea rows="4" placeholder="Notizen zur Tour ..." bind:value={tour.description}></textarea>
+            </label>
+            <button class="primary-button" type="submit" disabled={busy}>
+              {busy ? "Wird gespeichert ..." : "Tourdaten speichern"}
+            </button>
+          </form>
+        {:else}
+          <div class="read-only">
+            <span class="direction-tag">
+              {tour.activityType === "bike" ? "Fahrradtour" : "Wanderung"}
+            </span>
+            {#if tour.description}
+              <p class="description">{tour.description}</p>
+            {:else}
+              <p>Noch keine Tourinformationen hinterlegt.</p>
+            {/if}
+            {#if tour.distanceKm !== null || tour.elevationGainM !== null}
+              <div class="stats">
+                {#if tour.distanceKm !== null}<span><strong>{tour.distanceKm}</strong> km</span>{/if}
+                {#if tour.elevationGainM !== null}<span><strong>{tour.elevationGainM}</strong> Höhenmeter</span>{/if}
+              </div>
+            {/if}
+            <p class="muted">Zum Bearbeiten mit dem App-Passwort anmelden.</p>
+          </div>
+        {/if}
+
+        <div class="uploads">
+          <div class="upload-row">
+            <div>
+              <strong>GPX-Track</strong>
+              <span>{tour.hasGpx ? "Track vorhanden" : "Noch kein Track hochgeladen"}</span>
+            </div>
+            {#if authenticated}
+              <label class="file-button">
+                {tour.hasGpx ? "Ersetzen" : "GPX hochladen"}
+                <input
+                  type="file"
+                  accept=".gpx,application/gpx+xml,application/xml,text/xml"
+                  disabled={busy}
+                  onchange={(event) => uploadFile("gpx", event.currentTarget.files?.[0])}
+                />
+              </label>
+            {/if}
+          </div>
+          <div class="upload-row">
+            <div>
+              <strong>Komoot-Karte</strong>
+              <span>{tour.hasKomootMap ? "Bild vorhanden" : "Optionales Vorschaubild"}</span>
+            </div>
+            {#if authenticated}
+              <label class="file-button">
+                Bild hochladen
+                <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onchange={(event) => uploadFile("komoot-map", event.currentTarget.files?.[0])} />
+              </label>
+            {/if}
+          </div>
+          <div class="upload-row">
+            <div>
+              <strong>Höhenprofil</strong>
+              <span>{tour.hasElevationProfile ? "Bild vorhanden" : "Optionales Vorschaubild"}</span>
+            </div>
+            {#if authenticated}
+              <label class="file-button">
+                Bild hochladen
+                <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onchange={(event) => uploadFile("elevation", event.currentTarget.files?.[0])} />
+              </label>
+            {/if}
+          </div>
+        </div>
+      </section>
+
+      <section class="panel map-panel">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Streckenverlauf</p>
+            <h2>GPX-Karte</h2>
+          </div>
+          {#if tour.hasGpx}<span class="direction-tag">GPX</span>{/if}
+        </div>
+        {#if tour.hasGpx}
+          <GpxMap src={`/api/tours/${encodeURIComponent(selectedAlbum.id)}/gpx`} />
+        {:else}
+          <div class="empty-map">
+            <span class="map-icon">⌖</span>
+            <strong>Noch kein GPX-Track</strong>
+            <p>Lade einen Track hoch, um den Streckenverlauf hier auf der Karte zu sehen.</p>
+          </div>
+        {/if}
+
+        {#if tourEmbedUrl && (tour.hasKomootMap || tour.hasElevationProfile)}
+          <div class="komoot-view-toggle" role="group" aria-label="Ansicht der Komoot-Daten">
+            <button
+              class:active={komootDisplayMode === "embed"}
+              type="button"
+              aria-pressed={komootDisplayMode === "embed"}
+              onclick={() => (komootDisplayMode = "embed")}
+            >Komoot-Embed</button>
+            <button
+              class:active={komootDisplayMode === "local"}
+              type="button"
+              aria-pressed={komootDisplayMode === "local"}
+              onclick={() => (komootDisplayMode = "local")}
+            >Lokale Screenshots</button>
+          </div>
+        {/if}
+
+        {#if tourEmbedUrl && komootDisplayMode === "embed" && !komootPreview}
+          <div class="komoot-tour-embed">
+            <div class="section-title">
+              <div>
+                <p class="eyebrow">Öffentliche Komoot-Daten</p>
+                <h2>Karte und Höhenprofil</h2>
+              </div>
+            </div>
+            <iframe
+              class="komoot-embed"
+              src={tourEmbedUrl}
+              title="Komoot-Karte und Höhenprofil"
+              loading="lazy"
+              referrerpolicy="strict-origin-when-cross-origin"
+              allow="fullscreen"
+            ></iframe>
+            <p class="muted">Dieser offizielle Embed wird direkt von Komoot geladen; die Bilder werden nicht lokal gespeichert.</p>
+          </div>
+        {/if}
+
+        {#if (tour.hasKomootMap || tour.hasElevationProfile) &&
+          (!tourEmbedUrl || komootDisplayMode === "local")}
+          <div class="preview-images">
+            {#if tour.hasKomootMap}
+              <figure>
+                <img src={`/api/tours/${encodeURIComponent(selectedAlbum.id)}/images/komoot-map?v=${imageVersion}`} alt="Komoot-Kartenvorschau" />
+                <figcaption>Komoot-Karte</figcaption>
+              </figure>
+            {/if}
+            {#if tour.hasElevationProfile}
+              <figure>
+                <img src={`/api/tours/${encodeURIComponent(selectedAlbum.id)}/images/elevation?v=${imageVersion}`} alt="Höhenprofil" />
+                <figcaption>Höhenprofil</figcaption>
+              </figure>
+            {/if}
+          </div>
+        {/if}
+      </section>
+
+      <section class="panel comments-panel">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Gemeinsame Erinnerungen</p>
+            <h2>Kommentare <span class="count">{comments.length}</span></h2>
+          </div>
+        </div>
+        {#if comments.length}
+          <div class="comment-list">
+            {#each comments as comment (comment.id)}
+              <article class="comment">
+                <div class="comment-meta">
+                  <strong>{comment.author || "Anonym"}</strong>
+                  <time datetime={comment.created_at}>
+                    {new Date(comment.created_at).toLocaleDateString("de-DE", { dateStyle: "medium" })}
+                  </time>
+                </div>
+                <p>{comment.text}</p>
+              </article>
+            {/each}
+          </div>
+        {:else}
+          <p class="muted">Noch keine Kommentare zu dieser Tour.</p>
+        {/if}
+        {#if authenticated}
+          <form class="comment-form" onsubmit={addComment}>
+            <div class="form-row">
+              <label>
+                Name <span class="optional">(optional)</span>
+                <input maxlength="100" placeholder="Dein Name" bind:value={author} />
+              </label>
+              <label class="comment-input">
+                Kommentar
+                <textarea required maxlength="4000" rows="2" placeholder="Erinnerung oder Hinweis hinzufügen ..." bind:value={commentText}></textarea>
+              </label>
+            </div>
+            <button class="primary-button" type="submit" disabled={busy || !commentText.trim()}>
+              Kommentar hinzufügen
+            </button>
+          </form>
+        {:else}
+          <p class="muted">Zum Kommentieren bitte anmelden.</p>
+        {/if}
+      </section>
+    </div>
+  {:else}
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Deine Immich-Bibliothek</p>
+        <h1>Alben und Touren,<br /><span>verbunden unterwegs.</span></h1>
+        <p class="hero-copy">
+          Wähle ein Album und ergänze es um GPX-Tracks, Komoot-Infos und Erinnerungen.
+        </p>
+      </div>
+      <div class="hero-orbit" aria-hidden="true"><span>⌖</span></div>
+    </section>
+
+    <section class="library">
+      <div class="library-heading">
+        <div>
+          <p class="eyebrow">Deine Sammlung</p>
+          <h2>Alben <span class="count">{albums.length}</span></h2>
+        </div>
+        <div class="search-wrap">
+          <span aria-hidden="true">⌕</span>
+          <label class="sr-only" for="album-search">Alben suchen</label>
+          <input id="album-search" placeholder="Album suchen ..." bind:value={search} />
+        </div>
+      </div>
+
+      {#if loading}
+        <div class="empty-state"><span class="spinner"></span><p>Alben werden geladen ...</p></div>
+      {:else if filteredAlbums.length}
+        <div class="album-grid">
+          {#each filteredAlbums as album (album.id)}
+            <button class="album-card" onclick={() => openAlbum(album)}>
+              <div class="album-cover">
+                {#if album.albumThumbnailAssetId}
+                  <img src={thumbnail(album.albumThumbnailAssetId)} alt="" loading="lazy" />
+                {:else}
+                  <span class="cover-placeholder">⌖</span>
+                {/if}
+                <span class="asset-count">{album.assetCount ?? 0} Medien</span>
+              </div>
+              <div class="album-card-info">
+                <strong>{album.albumName}</strong>
+                <span>{album.description || "Tourdetails und Fotos ansehen"}</span>
+              </div>
+              <span class="card-arrow" aria-hidden="true">↗</span>
+            </button>
+          {/each}
+        </div>
+      {:else}
+        <div class="empty-state">
+          <span class="empty-icon">▱</span>
+          <strong>{search ? "Keine passenden Alben" : "Keine Alben gefunden"}</strong>
+          <p>{search ? "Ändere den Suchbegriff und versuche es erneut." : "Prüfe Immich-URL und API-Key in deiner Konfiguration."}</p>
+        </div>
+      {/if}
+    </section>
+  {/if}
+</main>
+
+<footer>
+  <span>Immich GPX Mapper <span class="version">Version {appVersion}</span></span>
+  <span>Deine Fotos bleiben in Immich.</span>
+</footer>
+
+<style>
+  :global(*) { box-sizing: border-box; }
+  :global(body) {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background: #f5f7f3;
+    color: #202a23;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  :global(button), :global(input), :global(textarea), :global(select) { font: inherit; }
+  :global(button) { cursor: pointer; }
+  .topbar {
+    height: 74px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 clamp(1.25rem, 5vw, 5rem);
+    border-bottom: 1px solid #e6ebe4;
+    background: #fbfcfa;
+  }
+  .brand { display: flex; align-items: center; gap: .7rem; color: inherit; text-decoration: none; font-size: .96rem; }
+  .brand strong { font-weight: 750; }
+  .brand-mark {
+    display: grid; width: 2rem; height: 2rem; place-items: center; border-radius: .65rem;
+    background: #dcebe0; color: #39714e; font-weight: 800;
+  }
+  .auth { display: flex; align-items: center; gap: 1rem; }
+  .auth-state { color: #48604d; font-size: .82rem; }
+  .dot { display: inline-block; width: .45rem; height: .45rem; margin-right: .4rem; border-radius: 50%; background: #4a9b63; }
+  .login-form { display: flex; gap: .5rem; }
+  .login-form input, input, textarea, select {
+    width: 100%; padding: .72rem .8rem; border: 1px solid #dce3db; border-radius: .65rem;
+    background: #fff; color: #202a23; outline: none;
+  }
+  input:focus, textarea:focus, select:focus { border-color: #6a9c77; box-shadow: 0 0 0 3px #4e8d5c1a; }
+  .login-form input { width: 10.5rem; padding: .55rem .7rem; font-size: .83rem; }
+  main { width: min(100% - 3rem, 1240px); min-height: calc(100vh - 135px); margin: 0 auto; padding: 3.2rem 0 5rem; }
+  .hero { display: flex; align-items: center; justify-content: space-between; min-height: 275px; margin-bottom: 3.4rem; padding: 2.3rem clamp(1.5rem, 5vw, 4.5rem); overflow: hidden; border-radius: 1.5rem; background: #e8efe7; }
+  .eyebrow { margin: 0 0 .65rem; color: #66836b; font-size: .69rem; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+  h1 { margin: 0; font-size: clamp(2.2rem, 5vw, 3.65rem); line-height: 1.08; letter-spacing: -.055em; }
+  .hero h1 span { color: #65846a; }
+  .hero-copy { max-width: 31rem; margin: 1.2rem 0 0; color: #67736a; line-height: 1.65; }
+  .hero-orbit { display: grid; flex: 0 0 170px; width: 170px; height: 170px; place-items: center; margin: 0 4% 0 2rem; border: 1px solid #b9cbb9; border-radius: 50%; color: #64856b; font-size: 4.2rem; }
+  .hero-orbit:before, .hero-orbit:after { position: absolute; width: 125px; height: 125px; border: 1px solid #c8d6c6; border-radius: 50%; content: ""; }
+  .hero-orbit:after { width: 80px; height: 80px; }
+  .library-heading, .section-title { display: flex; align-items: end; justify-content: space-between; gap: 1rem; }
+  h2 { margin: 0; font-size: 1.45rem; letter-spacing: -.03em; }
+  .count { display: inline-grid; min-width: 1.55rem; height: 1.55rem; place-items: center; margin-left: .35rem; padding: 0 .35rem; border-radius: 2rem; background: #e9eee7; color: #718071; font-size: .72rem; vertical-align: .15rem; }
+  .search-wrap { display: flex; align-items: center; gap: .5rem; width: min(100%, 16rem); color: #819082; }
+  .search-wrap input { border-color: #e0e6df; background: #fbfcfa; font-size: .86rem; }
+  .album-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.15rem; margin-top: 1.4rem; }
+  .album-card { position: relative; overflow: hidden; padding: 0; border: 1px solid #e5eae3; border-radius: 1rem; background: #fff; color: inherit; text-align: left; transition: transform .18s ease, box-shadow .18s ease; }
+  .album-card:hover { transform: translateY(-3px); box-shadow: 0 12px 30px #23302312; }
+  .album-cover { position: relative; display: grid; height: 180px; place-items: center; overflow: hidden; background: #e9eee8; }
+  .album-cover img { width: 100%; height: 100%; object-fit: cover; transition: transform .3s ease; }
+  .album-card:hover .album-cover img { transform: scale(1.035); }
+  .cover-placeholder { color: #93a793; font-size: 3rem; }
+  .asset-count { position: absolute; right: .75rem; bottom: .7rem; padding: .33rem .55rem; border: 1px solid #ffffff80; border-radius: 2rem; background: #202a23a8; color: white; font-size: .69rem; backdrop-filter: blur(8px); }
+  .album-card-info { display: grid; gap: .35rem; padding: 1rem 2.5rem 1.1rem 1rem; }
+  .album-card-info strong { overflow: hidden; font-size: .98rem; text-overflow: ellipsis; white-space: nowrap; }
+  .album-card-info span { overflow: hidden; color: #849084; font-size: .77rem; text-overflow: ellipsis; white-space: nowrap; }
+  .card-arrow { position: absolute; right: 1rem; bottom: 1.15rem; color: #809080; }
+  .empty-state { display: grid; min-height: 220px; place-content: center; justify-items: center; gap: .4rem; margin-top: 1.4rem; border: 1px dashed #d8e0d6; border-radius: 1rem; color: #738073; text-align: center; }
+  .empty-state p { margin: 0; font-size: .85rem; }
+  .empty-icon { font-size: 2rem; }
+  .spinner { width: 1.6rem; height: 1.6rem; border: 2px solid #dce6dc; border-top-color: #548060; border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  footer { display: flex; justify-content: space-between; padding: 1.3rem clamp(1.5rem, 5vw, 5rem); border-top: 1px solid #e6ebe4; color: #899389; font-size: .73rem; }
+  .version { margin-left: .35rem; color: #a0a99f; font-variant-numeric: tabular-nums; }
+  .alert { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin: 0 0 1.2rem; padding: .8rem 1rem; border-radius: .75rem; font-size: .88rem; }
+  .alert button { border: 0; background: transparent; color: inherit; font-size: 1.2rem; }
+  .error-alert { background: #fbecea; color: #a53d32; }
+  .notice-alert { background: #e7f2e7; color: #41694a; }
+  .back-link { margin: 0 0 1.4rem; padding: 0; border: 0; background: none; color: #607560; font-size: .85rem; }
+  .album-heading { display: flex; justify-content: space-between; align-items: end; gap: 1rem; margin-bottom: 1.35rem; }
+  .album-heading h1 { font-size: clamp(2rem, 5vw, 3rem); }
+  .muted { color: #7c887d; font-size: .85rem; line-height: 1.55; }
+  .album-heading .muted { margin: .55rem 0 0; }
+  .komoot-button, .primary-button, .small-button { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; border: 0; border-radius: .65rem; background: #477954; color: white; text-decoration: none; font-size: .82rem; font-weight: 700; }
+  .komoot-button { padding: .75rem 1rem; white-space: nowrap; }
+  .secondary-button { display: inline-flex; min-height: 2.45rem; align-items: center; justify-content: center; padding: .6rem .85rem; border: 1px solid #d5e1d4; border-radius: .65rem; background: #f3f7f1; color: #486f50; font-size: .79rem; font-weight: 700; }
+  .secondary-button:disabled { cursor: not-allowed; opacity: .55; }
+  .komoot-import { display: grid; justify-items: start; gap: .45rem; }
+  .komoot-import > .muted { margin: 0; font-size: .72rem; }
+  .komoot-preview { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr); gap: 1rem; margin-top: .35rem; padding: 1rem; border: 1px solid #dce8da; border-radius: .8rem; background: #f7faf6; }
+  .preview-copy { display: grid; align-content: start; justify-items: start; gap: .55rem; }
+  .preview-copy .eyebrow { margin: 0; font-size: .62rem; }
+  .preview-copy > strong { font-size: .9rem; }
+  .preview-copy > p:not(.eyebrow) { margin: 0; color: #657266; font-size: .76rem; line-height: 1.5; }
+  .preview-facts { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .preview-facts span { padding: .3rem .5rem; border-radius: 2rem; background: #e8efe6; color: #526a54; font-size: .68rem; }
+  .preview-copy .preview-note { color: #899187; font-size: .68rem; }
+  .komoot-embed-wrap { display: grid; gap: .4rem; color: #758174; font-size: .67rem; }
+  .komoot-embed { display: block; width: 100%; min-height: 700px; border: 0; border-radius: .6rem; background: #f4f6f2; }
+  .komoot-tour-embed { display: grid; gap: .5rem; margin-top: 1.5rem; }
+  .komoot-tour-embed .section-title { margin-bottom: .35rem; }
+  .komoot-tour-embed > .muted { margin: 0; }
+  .komoot-view-toggle { display: flex; width: fit-content; gap: .25rem; margin: 1rem 0 0; padding: .25rem; border-radius: .7rem; background: #edf2eb; }
+  .komoot-view-toggle button { min-height: 2.2rem; padding: .45rem .7rem; border: 0; border-radius: .5rem; background: transparent; color: #647064; font-size: .73rem; font-weight: 700; }
+  .komoot-view-toggle button.active { background: white; color: #3f6f49; box-shadow: 0 1px 3px #1c2a1c1c; }
+  .komoot-map-preview { display: grid; align-content: start; gap: .4rem; color: #758174; font-size: .67rem; text-decoration: none; }
+  .komoot-map-preview img { width: 100%; max-height: 210px; border-radius: .6rem; object-fit: cover; background: #e9eee8; }
+  .primary-button { min-height: 2.65rem; padding: .7rem 1rem; }
+  .small-button { padding: .55rem .8rem; font-size: .76rem; }
+  .primary-button:disabled, .small-button:disabled { cursor: not-allowed; opacity: .55; }
+  .quiet-button { padding: .5rem .7rem; border: 0; background: none; color: #607560; font-size: .8rem; }
+  .photo-strip { display: grid; grid-template-columns: repeat(8, 1fr); gap: .45rem; margin-bottom: 1.35rem; overflow: hidden; border-radius: .9rem; }
+  .photo-strip img { width: 100%; height: 92px; object-fit: cover; background: #e6ebe4; }
+  .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
+  .panel { min-width: 0; padding: clamp(1.1rem, 2.3vw, 1.7rem); border: 1px solid #e5eae3; border-radius: 1rem; background: #fff; }
+  .section-title { align-items: center; margin-bottom: 1.25rem; }
+  .section-title .eyebrow { margin-bottom: .35rem; }
+  .direction-tag { padding: .35rem .65rem; border-radius: 2rem; background: #eaf1e9; color: #57765d; font-size: .72rem; font-weight: 700; }
+  .tour-form, .tour-form label, .comment-form { display: grid; gap: .85rem; }
+  label { display: grid; gap: .38rem; color: #566257; font-size: .76rem; font-weight: 650; }
+  label input, label textarea, label select { font-size: .86rem; font-weight: 400; }
+  textarea { resize: vertical; }
+  .form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+  .form-row:has(select) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .read-only { min-height: 7rem; }
+  .description { white-space: pre-wrap; line-height: 1.6; }
+  .stats { display: flex; gap: 1.2rem; color: #667368; font-size: .8rem; }
+  .stats strong { color: #344a37; }
+  .uploads { display: grid; gap: .2rem; margin-top: 1.35rem; padding-top: .75rem; border-top: 1px solid #edf0eb; }
+  .upload-row { display: flex; min-height: 3.6rem; align-items: center; justify-content: space-between; gap: .8rem; border-bottom: 1px solid #f0f2ef; }
+  .upload-row > div { display: grid; gap: .2rem; }
+  .upload-row strong { font-size: .78rem; }
+  .upload-row span { color: #889287; font-size: .7rem; }
+  .file-button { position: relative; display: inline-flex; width: auto; padding: .48rem .7rem; border: 1px solid #dfe7dd; border-radius: .55rem; color: #4f7256; cursor: pointer; font-size: .7rem; white-space: nowrap; }
+  .file-button input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+  .map-panel { grid-column: 2; grid-row: 1 / span 2; }
+  .empty-map { display: grid; min-height: 340px; place-content: center; justify-items: center; padding: 1rem; border-radius: 1rem; background: #edf2eb; color: #687869; text-align: center; }
+  .empty-map strong { margin-top: .7rem; color: #465648; font-size: .9rem; }
+  .empty-map p { max-width: 18rem; font-size: .77rem; line-height: 1.5; }
+  .map-icon { display: grid; width: 3rem; height: 3rem; place-items: center; border-radius: 50%; background: #dce9dc; color: #5b8062; font-size: 1.8rem; }
+  .preview-images { display: grid; gap: .8rem; margin-top: 1rem; }
+  .preview-images figure { margin: 0; overflow: hidden; border: 1px solid #e7ece5; border-radius: .75rem; }
+  .preview-images img { display: block; width: 100%; max-height: 240px; object-fit: contain; background: #f5f7f3; }
+  .preview-images figcaption { padding: .6rem .75rem; color: #768276; font-size: .72rem; }
+  .comments-panel { grid-column: 1; }
+  .comment-list { display: grid; gap: .85rem; margin-bottom: 1rem; }
+  .comment { padding-bottom: .85rem; border-bottom: 1px solid #edf0eb; }
+  .comment-meta { display: flex; justify-content: space-between; gap: 1rem; font-size: .78rem; }
+  .comment-meta time { color: #929b91; font-size: .7rem; }
+  .comment p { margin: .45rem 0 0; color: #5c685d; font-size: .83rem; line-height: 1.55; white-space: pre-wrap; }
+  .comment-form { padding-top: .9rem; border-top: 1px solid #edf0eb; }
+  .comment-input { grid-column: 1 / -1; }
+  .optional { color: #9aa399; font-weight: 400; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+  @media (max-width: 850px) {
+    .album-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .detail-grid { grid-template-columns: 1fr; }
+    .map-panel, .comments-panel { grid-column: 1; grid-row: auto; }
+    .photo-strip { grid-template-columns: repeat(4, 1fr); }
+  }
+  @media (max-width: 560px) {
+    .topbar { height: auto; min-height: 68px; flex-wrap: wrap; gap: .75rem; padding: .8rem 1rem; }
+    .brand { font-size: .82rem; }
+    .brand { flex: 1 1 100%; }
+    .brand-mark { width: 1.7rem; height: 1.7rem; }
+    .auth-state { display: none; }
+    .auth, .login-form { width: 100%; }
+    .login-form input { flex: 1; width: auto; min-width: 0; }
+    main { width: min(100% - 2rem, 1240px); padding-top: 1.4rem; }
+    .hero { min-height: 245px; margin-bottom: 2.4rem; padding: 1.5rem; }
+    .hero-orbit { flex-basis: 70px; width: 70px; height: 70px; margin: 0; font-size: 2rem; }
+    .hero-orbit:before { width: 55px; height: 55px; }
+    .hero-orbit:after { width: 35px; height: 35px; }
+    .hero-copy { font-size: .85rem; }
+    .album-grid { grid-template-columns: 1fr; }
+    .album-cover { height: 190px; }
+    .library-heading { align-items: start; flex-direction: column; }
+    .search-wrap { width: 100%; }
+    .album-heading { align-items: start; flex-direction: column; }
+    .photo-strip { grid-template-columns: repeat(4, 1fr); }
+    .photo-strip img { height: 66px; }
+    .form-row, .form-row:has(select) { grid-template-columns: 1fr; }
+    .komoot-embed { min-height: 560px; }
+    .komoot-map-preview { grid-row: 1; }
+    .map-panel :global(.map) { min-height: 260px; }
+    .comment-input { grid-column: auto; }
+    footer { gap: .5rem; flex-direction: column; padding: 1.2rem 1rem; }
+  }
+</style>

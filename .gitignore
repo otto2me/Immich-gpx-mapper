@@ -1,0 +1,13 @@
+node_modules/
+**/node_modules/
+**/build/
+**/dist/
+**/.svelte-kit/
+coverage/
+.env
+.env.*
+!.env.example
+immich-gpx-mapper-data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

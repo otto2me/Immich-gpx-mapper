@@ -1,0 +1,26 @@
+services:
+  immich-gpx-mapper:
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-unknown}
+    container_name: immich-gpx-mapper
+    restart: unless-stopped
+    environment:
+      IMMICH_API_URL: ${IMMICH_API_URL:-http://immich-server:2283}
+      IMMICH_API_KEY: ${IMMICH_API_KEY:?Set IMMICH_API_KEY in .env}
+      APP_PASSWORD: ${APP_PASSWORD:?Set APP_PASSWORD in .env}
+      DATA_DIR: /data
+      CONFIG_FILE: /data/config.json
+      PORT: 3000
+    volumes:
+      - ./immich-gpx-mapper-data:/data
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - immich-network
+
+networks:
+  immich-network:
+    external: true
+    name: ${IMMICH_DOCKER_NETWORK:-immich_default}

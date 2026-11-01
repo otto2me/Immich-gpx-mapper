@@ -1,0 +1,27 @@
+
+• Docker container
+• Https Nutzung
+• Config und andere Daten auf einem gemounteten Volumen
+• Config parameter für immich API key
+• Nutzung immich UI
+• Immich Zugriff auf Alben
+• Erweiterung dieser Alben mit zusätzlichen Daten
+○ Komot link
+○ GPX Anhang
+○ Beschreibung
+○ Kommentare
+○ Richtung der Wanderung
+○ Komot Bild der Karte und Höhenunterschied
+• Leaflet-GPX prüfen
+• Nginx-Webserver
+• Docker compose in bestehendes immich compose einbinden
+• Das ganze als github Projekt anlegen
+
+
+
+Cursor (AI-first IDE)​Warum: Basiert auf VS Code, hat aber tief integrierte KI-Unterstützung. Du kannst der KI den Immich-API-Aufruf und deinen Wunschentwurf beschreiben, und sie schreibt dir das Grundgerüst für die Leaflet-Integration und das Dockerfile nahezu komplett vor.
+
+
+ToDos:
+- Tests mit realer immich instanz
+- lass prüfen ob ein test auch mit meiner http foto website und dem API key möglich ist, damit ich nicht jedesmal doker neu aufsetzen muss
