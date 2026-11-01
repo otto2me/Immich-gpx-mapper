@@ -119,10 +119,21 @@ export async function captureKomootScreenshots(embedUrl: string) {
       }
     });
 
-    await page.goto(embedUrl, {
-      waitUntil: "commit",
-      timeout: screenshotTimeoutMs
-    });
+    await page.setContent("<!doctype html><html><head><meta charset=\"utf-8\"></head><body></body></html>");
+    await page.locator("body").evaluate((body, url) => {
+      const iframe = document.createElement("iframe");
+      iframe.id = "komoot-embed";
+      iframe.src = url;
+      iframe.title = "Komoot-Karte und Höhenprofil";
+      iframe.allow = "fullscreen";
+      iframe.referrerPolicy = "strict-origin-when-cross-origin";
+      iframe.width = "1280";
+      iframe.height = "1000";
+      iframe.style.width = "1280px";
+      iframe.style.height = "1000px";
+      iframe.style.border = "0";
+      body.append(iframe);
+    }, embedUrl);
 
     const mapCanvas = await waitForVisibleInAnyFrame(page, "canvas.maplibregl-canvas", blockedHosts);
     const elevationProfile = await waitForVisibleInAnyFrame(page, "[data-activity-profile-card]", blockedHosts);
