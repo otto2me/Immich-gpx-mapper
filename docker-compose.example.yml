@@ -1,9 +1,6 @@
 services:
   immich-gpx-mapper:
-    build:
-      context: .
-      args:
-        APP_VERSION: ${APP_VERSION:-unknown}
+    image: ghcr.io/otto2me/immich-gpx-mapper:latest
     container_name: immich-gpx-mapper
     restart: unless-stopped
     environment:

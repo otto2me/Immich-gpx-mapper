@@ -52,11 +52,14 @@ auf ein beschreibbares Verzeichnis gesetzt werden.
    `config.example.json` dort als `config.json` ablegen.
 6. sicherstellen, dass der Ordner für UID 1000 beschreibbar ist (z. B. per
    SSH auf dem Docker-Host mit `sudo chown -R 1000:1000 immich-gpx-mapper-data`).
-7. Compose-Datei in denselben Stack aufnehmen und den Container bauen/starten:
+7. Compose-Datei in denselben Stack aufnehmen und den Container starten. Das Image wird durch GitHub Actions nach GHCR veröffentlicht, sobald der Workflow auf `main` ausgeführt wurde:
 
    ```sh
-   APP_VERSION="$(git describe --tags --always --dirty)" docker compose up -d --build immich-gpx-mapper
+   docker compose pull immich-gpx-mapper
+   docker compose up -d immich-gpx-mapper
    ```
+
+Für private GHCR-Pakete muss Docker vor dem Pull bei `ghcr.io` angemeldet sein. Für einen Stack auf einem NAS ohne Registry-Anmeldung das Paket in den GitHub-Paketeinstellungen auf öffentlich stellen.
 
 Der Compose-Ausschnitt veröffentlicht `127.0.0.1:3000`. Im Synology DSM unter
 **Systemsteuerung → Anmeldeportal → Erweitert → Reverse Proxy** eine Regel
