@@ -19,6 +19,10 @@ function isAllowedResourceUrl(value: string) {
     const url = new URL(value);
     return url.protocol === "https:" && (
       allowedResourceHosts.has(url.hostname) ||
+      url.hostname === "komoot.net" ||
+      url.hostname.endsWith(".komoot.net") ||
+      url.hostname === "openstreetmap.org" ||
+      url.hostname.endsWith(".openstreetmap.org") ||
       url.hostname.endsWith(".komoot.com") ||
       url.hostname.endsWith(".komoot.de")
     );
@@ -48,7 +52,8 @@ function findChromiumExecutable() {
 
 async function waitForVisibleInAnyFrame(
   page: import("playwright-core").Page,
-  selector: string
+  selector: string,
+  blockedHosts: Set<string>
 ) {
   const deadline = Date.now() + screenshotTimeoutMs;
   while (Date.now() < deadline) {
@@ -58,7 +63,19 @@ async function waitForVisibleInAnyFrame(
     }
     await page.waitForTimeout(100);
   }
-  throw new Error(`Kein sichtbares Element ${selector} in Browser-Frames gefunden`);
+  const frameLocations = page.frames().map((frame) => {
+    try {
+      const url = new URL(frame.url());
+      return url.host ? `${url.host}${url.pathname}` : url.protocol;
+    } catch {
+      return "unknown-frame";
+    }
+  });
+  const diagnostics = [
+    `frames: ${frameLocations.join(", ") || "none"}`,
+    `blocked hosts: ${[...blockedHosts].sort().join(", ") || "none"}`
+  ].join("; ");
+  throw new Error(`Kein sichtbares Element ${selector} in Browser-Frames gefunden (${diagnostics})`);
 }
 
 export async function captureKomootScreenshots(embedUrl: string) {
@@ -87,10 +104,17 @@ export async function captureKomootScreenshots(embedUrl: string) {
       serviceWorkers: "block"
     });
     const page = await context.newPage();
+    const blockedHosts = new Set<string>();
     await page.route("**/*", async (route) => {
-      if (isAllowedResourceUrl(route.request().url())) {
+      const resourceUrl = route.request().url();
+      if (isAllowedResourceUrl(resourceUrl)) {
         await route.continue();
       } else {
+        try {
+          blockedHosts.add(new URL(resourceUrl).hostname);
+        } catch {
+          blockedHosts.add("invalid-url");
+        }
         await route.abort();
       }
     });
@@ -100,8 +124,8 @@ export async function captureKomootScreenshots(embedUrl: string) {
       timeout: screenshotTimeoutMs
     });
 
-    const mapCanvas = await waitForVisibleInAnyFrame(page, "canvas.maplibregl-canvas");
-    const elevationProfile = await waitForVisibleInAnyFrame(page, "[data-activity-profile-card]");
+    const mapCanvas = await waitForVisibleInAnyFrame(page, "canvas.maplibregl-canvas", blockedHosts);
+    const elevationProfile = await waitForVisibleInAnyFrame(page, "[data-activity-profile-card]", blockedHosts);
     await page.waitForTimeout(1200);
 
     const mapImage = await mapCanvas
