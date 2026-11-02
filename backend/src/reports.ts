@@ -1,12 +1,15 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { isAuthenticated } from "./auth.js";
 import { parseTourSchedule } from "./tour-selection.js";
+import { toApiTour } from "./tours.js";
+import type { Tour } from "./database.js";
 
 type ReportPhoto = { assetId: string; caption: string };
 type Chapter = { id: string; title: string; date: string | null; text: string; tourId: string | null; photos: ReportPhoto[] };
-type ReportRow = { id: string; title: string; introduction: string; chapters_json: string; revision: number; updated_at: string };
+type ReportRow = { id: string; immich_album_id: string; title: string; introduction: string; chapters_json: string; revision: number; updated_at: string };
+type ShareRow = { id: string; label: string; createdAt: string; expiresAt: string | null; revokedAt: string | null };
 
 function badRequest(message: string): never {
   throw Object.assign(new Error(message), { statusCode: 400 });
@@ -51,6 +54,81 @@ export async function registerReportRoutes(
   function getReport(albumId: string) {
     return database.prepare("SELECT * FROM reports WHERE immich_album_id = ?").get(albumId) as ReportRow | undefined;
   }
+
+  function sharesFor(reportId: string) {
+    return database.prepare(`SELECT id, label, created_at AS createdAt,
+      expires_at AS expiresAt, revoked_at AS revokedAt FROM report_shares
+      WHERE report_id = ? ORDER BY created_at DESC, id`).all(reportId) as ShareRow[];
+  }
+
+  app.get<{ Params: { albumId: string } }>(
+    "/api/albums/:albumId/report/shares", { preHandler: requireLogin },
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      const report = getReport(request.params.albumId);
+      return report ? sharesFor(report.id) : [];
+    }
+  );
+
+  app.post<{ Params: { albumId: string }; Body: unknown }>(
+    "/api/albums/:albumId/report/shares", { preHandler: requireLogin },
+    async (request, reply) => {
+      const report = getReport(request.params.albumId);
+      if (!report) return reply.code(404).send({ message: "Bitte zuerst den Reisebericht speichern" });
+      const input = object(request.body);
+      const label = text(input.label ?? "", "Bezeichnung", 100) || "Freigabelink";
+      let expiresAt: string | null = null;
+      if (input.expiresAt !== undefined && input.expiresAt !== null && input.expiresAt !== "") {
+        if (typeof input.expiresAt !== "string" || input.expiresAt.length > 50) badRequest("Ungültige Ablaufzeit");
+        const instant = new Date(input.expiresAt);
+        if (!Number.isFinite(instant.getTime()) || instant.getTime() <= Date.now()) badRequest("Die Ablaufzeit muss in der Zukunft liegen");
+        expiresAt = instant.toISOString();
+      }
+      const id = randomUUID();
+      const token = randomBytes(32).toString("base64url");
+      const hash = createHash("sha256").update(token).digest("hex");
+      const now = new Date().toISOString();
+      database.prepare(`INSERT INTO report_shares
+        (id, report_id, token_hash, label, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`
+      ).run(id, report.id, hash, label, now, expiresAt);
+      reply.header("cache-control", "no-store");
+      return reply.code(201).send({ share: { id, label, createdAt: now, expiresAt, revokedAt: null }, token });
+    }
+  );
+
+  app.post<{ Params: { albumId: string; shareId: string } }>(
+    "/api/albums/:albumId/report/shares/:shareId/revoke", { preHandler: requireLogin },
+    async (request, reply) => {
+      const report = getReport(request.params.albumId);
+      if (!report) return reply.code(404).send({ message: "Freigabelink nicht gefunden" });
+      const result = database.prepare(`UPDATE report_shares SET revoked_at = COALESCE(revoked_at, ?)
+        WHERE id = ? AND report_id = ?`).run(new Date().toISOString(), request.params.shareId, report.id);
+      if (!result.changes) return reply.code(404).send({ message: "Freigabelink nicht gefunden" });
+      reply.header("cache-control", "no-store");
+      return { revoked: true };
+    }
+  );
+
+  app.get("/api/shared-report", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    reply.header("x-robots-tag", "noindex, nofollow");
+    const token = request.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
+    const invalidLink = () => reply.code(404).send({ message: "Freigabelink ist ungültig, abgelaufen oder widerrufen" });
+    if (!token) return invalidLink();
+    const hash = createHash("sha256").update(token).digest("hex");
+    const row = database.prepare(`SELECT reports.* FROM report_shares
+      JOIN reports ON reports.id = report_shares.report_id
+      WHERE report_shares.token_hash = ? AND report_shares.revoked_at IS NULL
+      AND (report_shares.expires_at IS NULL OR report_shares.expires_at > ?)`
+    ).get(hash, new Date().toISOString()) as ReportRow | undefined;
+    if (!row) return invalidLink();
+    const report = toReport(row)!;
+    const tourIds = new Set(report.chapters.map((chapter) => chapter.tourId).filter((id): id is string => Boolean(id)));
+    const tours = [...tourIds].map((id) => toApiTour(database.prepare(
+      "SELECT * FROM tours WHERE id = ? AND immich_album_id = ?"
+    ).get(id, row.immich_album_id) as Tour | undefined)).filter((tour) => tour !== null);
+    return { report, albumId: row.immich_album_id, tours };
+  });
 
   app.get<{ Params: { albumId: string } }>(
     "/api/albums/:albumId/report",

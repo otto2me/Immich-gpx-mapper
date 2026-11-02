@@ -33,7 +33,7 @@ type TourInput = {
 
 class ValidationError extends Error {}
 
-function toApiTour(tour: Tour | undefined) {
+export function toApiTour(tour: Tour | undefined) {
   if (!tour) return null;
   return {
     id: tour.id,

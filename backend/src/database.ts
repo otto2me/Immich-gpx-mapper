@@ -125,6 +125,16 @@ export async function openDatabase(config: AppConfig) {
       revision INTEGER NOT NULL DEFAULT 1,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS report_shares (
+      id TEXT PRIMARY KEY,
+      report_id TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      label TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT,
+      revoked_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS report_shares_report ON report_shares(report_id);
   `);
   return database;
 }

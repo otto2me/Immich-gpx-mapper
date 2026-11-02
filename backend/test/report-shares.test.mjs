@@ -1,0 +1,61 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { test } from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import Fastify from "fastify";
+import { openDatabase } from "../dist/database.js";
+import { registerAuth } from "../dist/auth.js";
+import { registerReportRoutes } from "../dist/reports.js";
+
+test("share links are hashed, expire and revoke independently of the open album reader", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "mapper-share-"));
+  const database = await openDatabase({ dataDir });
+  const app = Fastify();
+  try {
+    await registerAuth(app, { appPassword: "ShareTestPassword123!" });
+    await registerReportRoutes(app, database, async () => true);
+    const base = "/api/albums/album/report";
+    assert.equal((await app.inject({ url: `${base}/shares` })).statusCode, 401);
+    assert.equal((await app.inject({ method: "POST", url: `${base}/shares`, payload: {} })).statusCode, 401);
+    const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { password: "ShareTestPassword123!" } });
+    const headers = { cookie: login.headers["set-cookie"].split(";")[0] };
+    assert.equal((await app.inject({ method: "POST", url: `${base}/shares`, headers, payload: {} })).statusCode, 404);
+    await app.inject({ method: "PUT", url: base, headers, payload: { title: "Trip", introduction: "First", chapters: [], revision: 0 } });
+    const created = await app.inject({ method: "POST", url: `${base}/shares`, headers, payload: { label: "Family" } });
+    assert.equal(created.statusCode, 201);
+    const { token, share } = created.json();
+    assert.match(token, /^[A-Za-z0-9_-]{43}$/);
+    const stored = database.prepare("SELECT * FROM report_shares WHERE id = ?").get(share.id);
+    assert.equal(stored.token_hash, createHash("sha256").update(token).digest("hex"));
+    assert.ok(!JSON.stringify(stored).includes(token));
+    const listed = await app.inject({ url: `${base}/shares`, headers });
+    assert.ok(!listed.body.includes(token));
+    assert.ok(!listed.body.includes(stored.token_hash));
+    const read = () => app.inject({ url: "/api/shared-report", headers: { authorization: `Bearer ${token}` } });
+    assert.equal((await read()).statusCode, 200);
+    await app.inject({ method: "PUT", url: base, headers, payload: { title: "Trip updated", introduction: "Latest", chapters: [], revision: 1 } });
+    assert.equal((await read()).json().report.title, "Trip updated");
+    assert.equal((await app.inject({ url: "/api/shared-report" })).statusCode, 404);
+    assert.equal((await app.inject({ url: "/api/shared-report", headers: { authorization: `Bearer ${"x".repeat(43)}` } })).statusCode, 404);
+    const revokeUrl = `${base}/shares/${share.id}/revoke`;
+    assert.equal((await app.inject({ method: "POST", url: revokeUrl })).statusCode, 401);
+    assert.equal((await app.inject({ method: "POST", url: `/api/albums/other/report/shares/${share.id}/revoke`, headers })).statusCode, 404);
+    assert.equal((await app.inject({ method: "POST", url: revokeUrl, headers })).statusCode, 200);
+    assert.equal((await app.inject({ method: "POST", url: revokeUrl, headers })).statusCode, 200);
+    assert.equal((await read()).statusCode, 404);
+    assert.equal((await app.inject({ url: base })).statusCode, 200);
+    const expired = await app.inject({ method: "POST", url: `${base}/shares`, headers, payload: { expiresAt: new Date(Date.now() + 60000).toISOString() } });
+    assert.equal(expired.statusCode, 201);
+    database.prepare("UPDATE report_shares SET expires_at = ? WHERE id = ?").run("2000-01-01T00:00:00.000Z", expired.json().share.id);
+    assert.equal((await app.inject({ url: "/api/shared-report", headers: { authorization: `Bearer ${expired.json().token}` } })).statusCode, 404);
+    assert.equal((await app.inject({ method: "POST", url: `${base}/shares`, headers, payload: { expiresAt: "2000-01-01T00:00:00Z" } })).statusCode, 400);
+    assert.equal((await app.inject({ method: "PUT", url: base, headers: { authorization: `Bearer ${token}` }, payload: {} })).statusCode, 401);
+    assert.equal((await read()).headers["cache-control"], "no-store");
+  } finally {
+    await app.close();
+    database.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});

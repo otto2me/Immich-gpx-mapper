@@ -1,0 +1,12 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Validate revocable report link backend",
+			"type": "shell",
+			"command": "$env:PATH='C:\\Users\\Oli\\AppData\\Local\\Programs\\nodejs-26.13.0;' + $env:PATH\n& 'C:\\Users\\Oli\\AppData\\Local\\Programs\\nodejs-26.13.0\\npm.cmd' run build --workspace backend\nif ($LASTEXITCODE -ne 0) {throw 'Backend build failed'}\n& 'C:\\Users\\Oli\\AppData\\Local\\Programs\\nodejs-26.13.0\\node.exe' --test backend/test/report-shares.test.mjs backend/test/reports.test.mjs backend/test/tours.test.mjs\nif ($LASTEXITCODE -ne 0) {throw 'Share regression failed'}",
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}
