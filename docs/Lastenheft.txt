@@ -10,6 +10,7 @@
 • Nutzung immich UI
 • Immich Zugriff auf Alben
 • Erweiterung dieser Alben mit zusätzlichen Daten
+○ Alle Mapper-Zusatzdaten eines Albums nach Anmeldung und ausdrücklicher Bestätigung löschen; Immich-Alben, Fotos und ZIP-Sicherungen erhalten
 ○ Komot link
 ○ GPX Anhang
 ○ GPX-Track, Komoot-Karte und Höhenprofil derselben Tour zuordnen und gemeinsam beim Immich-Album anzeigen

@@ -176,6 +176,9 @@ export const api = {
   komootLinkedAlbums: () => request<string[]>("/api/tours/komoot-linked-albums"),
   album: (id: string) =>
     request<Album>(`/api/albums/${encodeURIComponent(id)}`),
+  deleteAlbumData: (id: string) => request<{ deleted: boolean; tours: number; reports: number; files: number; warning?: string }>(
+    `/api/albums/${encodeURIComponent(id)}/mapper-data`, { method: "DELETE", body: JSON.stringify({ confirm: true }) }
+  ),
   albumMapMarkers: (id: string, tourId?: string | null) =>
     request<MapMarker[]>(`/api/albums/${encodeURIComponent(id)}/map-markers${tourId ? `?${new URLSearchParams({ tourId })}` : ""}`),
   albumAssets: (id: string, page: number, tourId?: string | null) =>

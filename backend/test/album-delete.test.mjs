@@ -1,0 +1,58 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import Fastify from "fastify";
+import { openDatabase } from "../dist/database.js";
+import { registerAuth } from "../dist/auth.js";
+import { registerTourRoutes } from "../dist/tours.js";
+
+test("album reset removes only confirmed local data and preserves other albums, shared files and backups", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "mapper-delete-"));
+  const database = await openDatabase({ dataDir });
+  const app = Fastify();
+  try {
+    await mkdir(join(dataDir, "uploads")); await mkdir(join(dataDir, "backups"));
+    for (const file of ["track.gpx", "image.png", "shared.png", "other.gpx"]) await writeFile(join(dataDir, "uploads", file), "keep or delete");
+    await writeFile(join(dataDir, "backups", "archive.zip"), "preserved");
+    const insert = database.prepare("INSERT INTO tours(id, immich_album_id, tour_date, gpx_file_path, komoot_map_image_path, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?)");
+    insert.run("one", "album", "2026-01-01", "track.gpx", "image.png", "now", "now");
+    insert.run("two", "album", "2026-01-02", null, "shared.png", "now", "now");
+    insert.run("other", "other-album", "2026-01-01", "other.gpx", "shared.png", "now", "now");
+    database.prepare("INSERT INTO comments VALUES(?, ?, ?, ?, ?)").run("comment", "one", null, "delete", "now");
+    database.prepare("INSERT INTO comments VALUES(?, ?, ?, ?, ?)").run("other-comment", "other", null, "keep", "now");
+    database.prepare("INSERT INTO reports VALUES(?, ?, ?, ?, ?, ?, ?)").run("report", "album", "Delete", "", "[]", 1, "now");
+    database.prepare("INSERT INTO reports VALUES(?, ?, ?, ?, ?, ?, ?)").run("other-report", "other-album", "Keep", "", "[]", 1, "now");
+    database.prepare("INSERT INTO report_shares(id, report_id, token_hash, label, created_at) VALUES(?, ?, ?, ?, ?)").run("share", "report", "hash", "Delete", "now");
+    await registerAuth(app, { appPassword: "DeleteTestPassword123!" });
+    await registerTourRoutes(app, database, { dataDir });
+    const url = "/api/albums/album/mapper-data";
+    assert.equal((await app.inject({ method: "DELETE", url, payload: { confirm: true } })).statusCode, 401);
+    const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { password: "DeleteTestPassword123!" } });
+    const headers = { cookie: login.headers["set-cookie"].split(";")[0] };
+    assert.equal((await app.inject({ method: "DELETE", url, headers, payload: {} })).statusCode, 400);
+    assert.equal(database.prepare("SELECT count(*) AS count FROM tours").get().count, 3);
+    database.exec("CREATE TRIGGER reject_report_delete BEFORE DELETE ON reports BEGIN SELECT RAISE(ABORT, 'test rejection'); END;");
+    const failed = await app.inject({ method: "DELETE", url, headers, payload: { confirm: true } });
+    assert.equal(failed.statusCode, 500);
+    assert.equal(database.prepare("SELECT count(*) AS count FROM tours").get().count, 3);
+    assert.equal(await readFile(join(dataDir, "uploads", "track.gpx"), "utf8"), "keep or delete");
+    assert.equal(await readFile(join(dataDir, "uploads", "image.png"), "utf8"), "keep or delete");
+    database.exec("DROP TRIGGER reject_report_delete");
+    const removed = await app.inject({ method: "DELETE", url, headers, payload: { confirm: true } });
+    assert.equal(removed.statusCode, 200, removed.body);
+    assert.equal(removed.json().tours, 2);
+    assert.equal(removed.json().files, 2);
+    assert.equal(database.prepare("SELECT count(*) AS count FROM comments").get().count, 1);
+    assert.equal(database.prepare("SELECT count(*) AS count FROM reports").get().count, 1);
+    assert.equal(database.prepare("SELECT count(*) AS count FROM report_shares").get().count, 0);
+    assert.equal(database.prepare("SELECT id FROM tours").get().id, "other");
+    await assert.rejects(readFile(join(dataDir, "uploads", "track.gpx")));
+    await assert.rejects(readFile(join(dataDir, "uploads", "image.png")));
+    assert.equal(await readFile(join(dataDir, "uploads", "shared.png"), "utf8"), "keep or delete");
+    assert.equal(await readFile(join(dataDir, "backups", "archive.zip"), "utf8"), "preserved");
+    assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+    assert.equal((await app.inject({ method: "DELETE", url, headers, payload: { confirm: true } })).json().tours, 0);
+  } finally { await app.close(); database.close(); await rm(dataDir, { recursive: true, force: true }); }
+});

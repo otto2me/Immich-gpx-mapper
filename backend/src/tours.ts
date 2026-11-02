@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { basename, extname, resolve } from "node:path";
 import multipart from "@fastify/multipart";
 import type { FastifyInstance } from "fastify";
@@ -107,6 +108,47 @@ export async function registerTourRoutes(
   await app.register(multipart, {
     limits: { fileSize: maxUploadBytes, files: 1, fields: 0 }
   });
+
+  app.delete<{ Params: { albumId: string }; Body: { confirm?: unknown } }>(
+    "/api/albums/:albumId/mapper-data",
+    async (request, reply) => {
+      if (request.body?.confirm !== true) return reply.code(400).send({ message: "Löschen der Mapper-Einträge muss ausdrücklich bestätigt werden" });
+      const albumId = request.params.albumId;
+      const rows = database.prepare("SELECT * FROM tours WHERE immich_album_id = ?").all(albumId) as Tour[];
+      const otherRows = database.prepare("SELECT * FROM tours WHERE immich_album_id != ?").all(albumId) as Tour[];
+      const paths = (tour: Tour) => [tour.gpx_file_path, tour.komoot_map_image_path, tour.elevation_profile_image_path]
+        .filter((path): path is string => Boolean(path)).map((path) => basename(path));
+      const retained = new Set(otherRows.flatMap(paths));
+      const files = [...new Set(rows.flatMap(paths))].filter((file) => !retained.has(file));
+      const staging = resolve(config.dataDir, `.deleted-${randomUUID()}`);
+      const moved: Array<{ original: string; staged: string }> = [];
+      let reports = 0;
+      let transaction = false;
+      try {
+        mkdirSync(staging, { recursive: true });
+        database.exec("BEGIN IMMEDIATE"); transaction = true;
+        for (const file of files) {
+          const original = uploadPath(config, file);
+          if (!existsSync(original)) continue;
+          const staged = resolve(staging, file);
+          renameSync(original, staged);
+          moved.push({ original, staged });
+        }
+        reports = Number(database.prepare("DELETE FROM reports WHERE immich_album_id = ?").run(albumId).changes);
+        database.prepare("DELETE FROM tours WHERE immich_album_id = ?").run(albumId);
+        database.exec("COMMIT"); transaction = false;
+      } catch (error) {
+        if (transaction) database.exec("ROLLBACK");
+        for (const file of moved.reverse()) renameSync(file.staged, file.original);
+        await rm(staging, { recursive: true, force: true });
+        throw error;
+      }
+      let warning: string | undefined;
+      try { await rm(staging, { recursive: true, force: true }); }
+      catch { warning = "Einträge gelöscht; temporäre Upload-Dateien konnten nicht vollständig bereinigt werden"; }
+      return { deleted: true, tours: rows.length, reports, files: moved.length, warning };
+    }
+  );
 
   app.get("/api/tours/komoot-linked-albums", async () => {
     const rows = database.prepare(`

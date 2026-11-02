@@ -6,7 +6,7 @@
   import ReportEditor from "../lib/ReportEditor.svelte";
   import SharedReport from "../lib/SharedReport.svelte";
   import SettingsPage from "../lib/SettingsPage.svelte";
-  import { Settings } from "@lucide/svelte";
+  import { Settings, Trash2 } from "@lucide/svelte";
   import {
     api,
     emptyTour,
@@ -26,6 +26,7 @@
   let komootLinkedAlbumIds = $state<string[]>([]);
   let albumsPage = $state(1);
   let selectedAlbum = $state<Album | null>(null);
+  let albumDataVersion = $state(0);
   let shareToken = $state("");
   let settingsView = $state(false);
   let settingsBusy = $state(false);
@@ -555,6 +556,27 @@
     settingsBusy = false;
     notice = `Sicherung wiederhergestellt. Bitte den Container neu starten und erneut anmelden. Sicherheitskopie: ${result.safetyBackup}${result.warning ? ` · ${result.warning}` : ""}`;
   }
+
+  async function deleteAlbumData() {
+    if (!selectedAlbum || !authenticated || busy || reportSaving || settingsBusy) return;
+    const albumId = selectedAlbum.id;
+    if (!confirm(`Alle Mapper-Einträge zu „${selectedAlbum.albumName}“ löschen?\n\nTouren, Kommentare, Reisebericht, Freigabelinks und lokale Uploads werden entfernt. Das Immich-Album, seine Fotos und vorhandene ZIP-Sicherungen bleiben erhalten.${reportDirty ? "\n\nUngespeicherte Berichtsänderungen werden verworfen." : ""}`)) return;
+    busy = true;
+    error = "";
+    notice = "";
+    try {
+      const result = await api.deleteAlbumData(albumId);
+      reportDirty = false;
+      albumDataVersion += 1;
+      pushState(`/?${new URLSearchParams({ album: albumId })}`, {});
+      await loadAlbum(albumId);
+      notice = result.warning ?? "Mapper-Einträge gelöscht. Das Immich-Album und seine Fotos bleiben erhalten.";
+    } catch (reason) {
+      error = message(reason);
+    } finally {
+      busy = false;
+    }
+  }
 </script>
 
 <svelte:head>
@@ -627,11 +649,16 @@
           {#if selectedAlbum.description} · {selectedAlbum.description}{/if}
         </p>
       </div>
+      <div class="album-actions">
       {#if albumView === "tours" && tour.komootLink}
         <a class="komoot-button" href={tour.komootLink} target="_blank" rel="noreferrer">
           Tour in Komoot öffnen ↗
         </a>
       {/if}
+      {#if authenticated}
+        <button class="delete-album-data" type="button" disabled={busy || reportSaving || settingsBusy || selectingTour} onclick={deleteAlbumData}><Trash2 size={17} />Mapper-Einträge löschen</button>
+      {/if}
+      </div>
     </section>
 
     <div class="komoot-view-toggle album-view-toggle" role="group" aria-label="Albumansicht">
@@ -640,7 +667,7 @@
     </div>
 
     {#if albumView === "report"}
-      {#key `${selectedAlbum.id}:${authenticated}`}<ReportEditor album={selectedAlbum} {tours} canEdit={authenticated} {sharingEnabled} onOpenTour={openReportTour} bind:dirty={reportDirty} bind:saving={reportSaving} />{/key}
+      {#key `${selectedAlbum.id}:${authenticated}:${albumDataVersion}`}<ReportEditor album={selectedAlbum} {tours} canEdit={authenticated} {sharingEnabled} onOpenTour={openReportTour} bind:dirty={reportDirty} bind:saving={reportSaving} />{/key}
     {:else}
     <nav class="tour-navigation" aria-label="Touren im Album">
       <div class="tour-tabs" role="tablist" tabindex="-1" aria-label="Tagesauswahl" onkeydown={onTourTabKeydown}>
@@ -1201,6 +1228,9 @@
 </footer>
 
 <style>
+  .album-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .delete-album-data { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 9px 12px; border: 1px solid #d7a7a0; border-radius: 6px; background: #fff; color: #962e2e; }
+  .delete-album-data:disabled { opacity: .5; cursor: default; }
   .settings-button { display: inline-grid; place-items: center; flex: 0 0 38px; width: 38px; height: 38px; padding: 8px; }
   .album-view-toggle { margin: 24px 0 12px; }
   .tour-navigation { display: flex; align-items: center; gap: 12px; min-width: 0; margin: 20px 0; }

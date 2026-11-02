@@ -353,6 +353,7 @@ regulären Screenshot-Endpunkt erfolgreich aufgenommen und gespeichert.
 | `GET` | `/api/albums` | Immich-Alben abrufen |
 | `GET` | `/api/albums/:albumId` | Album inklusive Assets abrufen |
 | `GET` | `/api/albums/:albumId/tours` | Touren des Albums auflisten |
+| `DELETE` | `/api/albums/:albumId/mapper-data` | Lokale Album-Zusatzdaten mit Anmeldung und `confirm: true` löschen |
 | `POST` | `/api/albums/:albumId/tours` | Tour mit Datum und Zeitzone anlegen |
 | `GET` | `/api/albums/:albumId/report` | Gespeicherten Bericht ohne Anmeldung lesen |
 | `PUT` | `/api/albums/:albumId/report` | Validierten Bericht mit Versionsprüfung speichern |

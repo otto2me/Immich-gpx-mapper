@@ -184,6 +184,16 @@ auf der GPX-Karte. Die Albumfotos lassen sich über **Albumfotos** ein- und
 ausklappen. Ein Klick öffnet das Foto im Immich-Album-Viewer; dafür muss
 `IMMICH_WEB_URL` auf eine vom Browser erreichbare Immich-Adresse zeigen.
 
+### Mapper-Einträge eines Albums löschen
+
+Nach der Anmeldung steht im Albumkopf **Mapper-Einträge löschen** zur
+Verfügung. Nach ausdrücklicher Bestätigung werden sämtliche lokalen Touren,
+Kommentare, der Reisebericht, Freigabelinks und zugehörige Uploads entfernt.
+Das Immich-Album und seine Fotos werden nicht gelöscht und bleiben daher
+auch in der Albumliste sichtbar. Andere Alben, globale Einstellungen und
+vorhandene ZIP-Sicherungen bleiben erhalten. Ein späterer Import einer
+älteren Sicherung kann die gelöschten Mapper-Einträge wiederherstellen.
+
 ### Mehrere Touren in einem Urlaubsalbum
 
 Über **Tour anlegen** eine Tour mit Datum und Zeitzone hinzufügen. Je Album

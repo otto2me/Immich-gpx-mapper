@@ -17,6 +17,20 @@ und lokal geprüft. Verwaltbare Freigabelinks mit optionaler Ablaufzeit und
 Widerruf sind ebenfalls umgesetzt. Der normale Albumbericht bleibt bewusst
 ohne Anmeldung lesbar.
 
+## Lokale Album-Einträge löschen
+
+- Angemeldete Nutzer können im Albumkopf alle Mapper-Zusatzdaten löschen.
+  Die ausdrückliche Bestätigung nennt Touren, Kommentare, Bericht, Links und
+  lokale Uploads. Immich-Alben und Originalfotos bleiben unverändert.
+- Datenbanklöschung ist transaktional; Kommentare und Freigabelinks werden
+  über Fremdschlüssel entfernt. Uploads werden zunächst verschoben und im
+  Fehlerfall zurückgelegt. Gemeinsam von anderen Alben referenzierte Dateien,
+  globale Einstellungen und ZIP-Sicherungen bleiben erhalten.
+- Test prüft Anmeldung, fehlende Bestätigung, vollständige Löschung,
+  andere Alben, gemeinsam referenzierte Dateien und Backups. Browserprüfung
+  mit künstlichen Daten bestätigt Abbrechen, Bestätigen, leere Tourliste,
+  zurückgesetzten Bericht und erhaltenes ZIP; Mobilansicht ohne Überlauf.
+
 ## Einstellungen und ZIP-Backups
 
 - Angemeldete Nutzer erreichen über das Zahnrad eine Einstellungsseite.
