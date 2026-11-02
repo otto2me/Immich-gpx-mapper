@@ -92,7 +92,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
     headers: {
-      ...(init?.body instanceof FormData ? {} : { "content-type": "application/json" }),
+      ...(init?.body && !(init.body instanceof FormData) ? { "content-type": "application/json" } : {}),
       ...init?.headers
     }
   });
