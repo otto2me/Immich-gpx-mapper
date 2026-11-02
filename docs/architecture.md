@@ -193,7 +193,10 @@ Albumübersicht, werden jedoch keiner datierten Tour automatisch zugeordnet.
 Manuelle Ausnahmen je Foto sind noch nicht umgesetzt.
 
 Die Übersicht zeigt alle Albumfotos. Datums-Tabs wählen eine Tour; Galerie
-und Kartenmarker verwenden denselben Zeitfilter. Das Backend liest dafür
+und Kartenmarker verwenden denselben Zeitfilter. Bei genau einer Tour wird
+diese automatisch ausgewählt und der zusätzliche Übersichts-Tab ausgeblendet;
+auch ein alter Übersichts-Link öffnet dann direkt diese Tour. Bei mehreren
+Touren bleibt die Übersicht verfügbar. Das Backend liest dafür
 bei Bedarf alle Metadatenseiten des Albums und filtert vor der Ausgabe der
 Fotoseiten mit je 48 Einträgen. Der ungefilterte Albumzugriff bleibt paginiert.
 Immich-Assets werden nicht verändert. GPX, Kartenbilder und Kommentare

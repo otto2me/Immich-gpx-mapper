@@ -17,6 +17,26 @@ und lokal geprüft. Verwaltbare Freigabelinks mit optionaler Ablaufzeit und
 Widerruf sind ebenfalls umgesetzt. Der normale Albumbericht bleibt bewusst
 ohne Anmeldung lesbar.
 
+## Navigation und Versionsanzeige
+
+- Löschaktion als dezentes 32-Pixel-Papierkorb-Symbol neben dem Albumtitel,
+  nur angemeldet und mit unveränderter ausdrücklicher Bestätigung.
+- Redundante „Alle Alben“-Buttons entfernt; die Marke oben links führt
+  weiterhin mit den bestehenden Schutzabfragen zur Albumliste.
+- Genau eine Tour wird unabhängig von ihrem Datum direkt ausgewählt,
+  auch bei alten `view=overview`-Links. Der Übersichts-Tab entfällt dann.
+  Mehrere Touren behalten Übersicht und direkte Tour-Links; der Reisebericht
+  bleibt die Standardansicht des Albums.
+- GitHub Actions übergibt für Release-Builds den Tag und sonst die ersten
+  sieben Zeichen von `GITHUB_SHA` als `APP_VERSION`. Ursache der bisherigen
+  Anzeige „main“ war `github.ref_name`. Container-Update erforderlich.
+- Frontend-Build und neuer Navigationstest erfolgreich. Das tatsächliche
+  Bash-Skript aus dem Workflow wurde mit Branch- und Tag-Umgebung ausgeführt
+  und liefert die erwarteten Werte. Kein Image veröffentlicht.
+- Browserprüfung mit künstlicher Ein-Tour-Antwort: Tour direkt sichtbar,
+  genau ein Datumstab, kein zweiter Zurück-Button. Desktop bei 1280 und Mobil
+  bei 390 Pixeln ohne horizontalen Überlauf; Löschsymbol passt neben den Titel.
+
 ## Lokale Album-Einträge löschen
 
 - Angemeldete Nutzer können im Albumkopf alle Mapper-Zusatzdaten löschen.

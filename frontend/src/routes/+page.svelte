@@ -10,6 +10,7 @@
   import {
     api,
     emptyTour,
+    initialAlbumTour,
     komootEmbedUrl,
     tourResource,
     type Album,
@@ -147,9 +148,7 @@
       const params = new URLSearchParams(location.search);
       albumView = params.has("tour") || ["overview", "tours"].includes(params.get("view") ?? "") ? "tours" : "report";
       const requestedTour = params.get("tour");
-      const initialTour = params.get("view") === "overview" ? null :
-        savedTours.find((item) => item.id === requestedTour) ??
-        (savedTours.length === 1 && !savedTours[0].date ? savedTours[0] : null);
+      const initialTour = initialAlbumTour(savedTours, requestedTour, params.get("view") === "overview");
       await selectTour(initialTour?.id ?? null, false);
     } catch (reason) {
       error = message(reason);
@@ -636,14 +635,17 @@
   {#if shareToken}
     {#key shareToken}<SharedReport token={shareToken} />{/key}
   {:else if settingsView}
-    <button class="back-link" disabled={settingsBusy} onclick={backToAlbums}>← Alle Alben</button>
     {#if authenticated}<SettingsPage onSaved={settingsSaved} onRestored={backupRestored} bind:busy={settingsBusy} />{:else}<h1>Einstellungen</h1><p>Für Einstellungen und Sicherungen bitte anmelden.</p>{/if}
   {:else if selectedAlbum}
-    <button class="back-link" disabled={reportSaving} onclick={backToAlbums}>← Alle Alben</button>
     <section class="album-heading">
       <div>
         <p class="eyebrow">Immich-Album</p>
-        <h1>{selectedAlbum.albumName}</h1>
+        <div class="album-title-row">
+          <h1>{selectedAlbum.albumName}</h1>
+          {#if authenticated}
+            <button class="delete-album-data" type="button" title="Mapper-Einträge dieses Albums löschen" aria-label="Mapper-Einträge löschen" disabled={busy || reportSaving || settingsBusy || selectingTour} onclick={deleteAlbumData}><Trash2 size={16} /></button>
+          {/if}
+        </div>
         <p class="muted">
           {selectedAlbum.assetCount ?? selectedAlbum.assets?.length ?? 0} Fotos und Videos
           {#if selectedAlbum.description} · {selectedAlbum.description}{/if}
@@ -654,9 +656,6 @@
         <a class="komoot-button" href={tour.komootLink} target="_blank" rel="noreferrer">
           Tour in Komoot öffnen ↗
         </a>
-      {/if}
-      {#if authenticated}
-        <button class="delete-album-data" type="button" disabled={busy || reportSaving || settingsBusy || selectingTour} onclick={deleteAlbumData}><Trash2 size={17} />Mapper-Einträge löschen</button>
       {/if}
       </div>
     </section>
@@ -671,7 +670,7 @@
     {:else}
     <nav class="tour-navigation" aria-label="Touren im Album">
       <div class="tour-tabs" role="tablist" tabindex="-1" aria-label="Tagesauswahl" onkeydown={onTourTabKeydown}>
-        <button type="button" role="tab" aria-selected={!selectedTourId} aria-controls="tour-content" tabindex={!selectedTourId ? 0 : -1} disabled={busy} onclick={() => selectTour(null)}>Übersicht</button>
+        {#if tours.length !== 1}<button type="button" role="tab" aria-selected={!selectedTourId} aria-controls="tour-content" tabindex={!selectedTourId ? 0 : -1} disabled={busy} onclick={() => selectTour(null)}>Übersicht</button>{/if}
         {#each tours as item (item.id)}
           <button type="button" role="tab" aria-selected={selectedTourId === item.id} aria-controls="tour-content" tabindex={selectedTourId === item.id ? 0 : -1} title={item.title || tourDateLabel(item.date)} disabled={busy} onclick={() => selectTour(item.id ?? null)}>{tourDateLabel(item.date)}</button>
         {/each}
@@ -1229,7 +1228,11 @@
 
 <style>
   .album-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-  .delete-album-data { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 9px 12px; border: 1px solid #d7a7a0; border-radius: 6px; background: #fff; color: #962e2e; }
+  .album-title-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .album-title-row h1 { min-width: 0; overflow-wrap: anywhere; }
+  .delete-album-data { display: inline-grid; place-items: center; flex: 0 0 32px; width: 32px; height: 32px; padding: 7px; border: 0; border-radius: 4px; background: transparent; color: #8d6963; }
+  .delete-album-data:hover { color: #962e2e; background: #f9eae7; }
+  .delete-album-data:focus-visible { outline: 2px solid #962e2e; outline-offset: 3px; }
   .delete-album-data:disabled { opacity: .5; cursor: default; }
   .settings-button { display: inline-grid; place-items: center; flex: 0 0 38px; width: 38px; height: 38px; padding: 8px; }
   .album-view-toggle { margin: 24px 0 12px; }
@@ -1327,7 +1330,6 @@
   .alert button { border: 0; background: transparent; color: inherit; font-size: 1.2rem; }
   .error-alert { background: #fbecea; color: #a53d32; }
   .notice-alert { background: #e7f2e7; color: #41694a; }
-  .back-link { margin: 0 0 1.4rem; padding: 0; border: 0; background: none; color: #607560; font-size: .85rem; }
   .album-heading { display: flex; justify-content: space-between; align-items: end; gap: 1rem; margin-bottom: 1.35rem; }
   .album-heading h1 { font-size: clamp(2rem, 5vw, 3rem); }
   .muted { color: #7c887d; font-size: .85rem; line-height: 1.55; }

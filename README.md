@@ -186,8 +186,9 @@ ausklappen. Ein Klick öffnet das Foto im Immich-Album-Viewer; dafür muss
 
 ### Mapper-Einträge eines Albums löschen
 
-Nach der Anmeldung steht im Albumkopf **Mapper-Einträge löschen** zur
-Verfügung. Nach ausdrücklicher Bestätigung werden sämtliche lokalen Touren,
+Nach der Anmeldung steht neben dem Albumtitel ein kleines Papierkorb-Symbol
+für **Mapper-Einträge löschen** zur Verfügung. Nach ausdrücklicher Bestätigung
+werden sämtliche lokalen Touren,
 Kommentare, der Reisebericht, Freigabelinks und zugehörige Uploads entfernt.
 Das Immich-Album und seine Fotos werden nicht gelöscht und bleiben daher
 auch in der Albumliste sichtbar. Andere Alben, globale Einstellungen und
@@ -200,6 +201,16 @@ vorhandene ZIP-Sicherungen bleiben erhalten. Ein späterer Import einer
 ist eine Tour pro Tag möglich. Die **Übersicht** zeigt weiterhin alle Fotos;
 die Datums-Tabs zeigen die jeweilige Tour mit eigenen GPX-Dateien, Bildern
 und Kommentaren.
+
+Bei genau einer Tour wird diese unter **Touren** direkt angezeigt; der
+zusätzliche Übersichts-Tab entfällt. Bei mehreren Touren bleiben Übersicht
+und Datums-Tabs erhalten. Zur Albumliste führt der Markenlink **Immich GPX
+Mapper** oben links; ein zweiter Zurück-Button ist nicht nötig.
+
+Die Footer-Version stammt lokal aus Git. Veröffentlichte Container zeigen
+einen Release-Tag oder den kurzen Commit-Hash, nicht den Branchnamen `main`.
+Die Korrektur wird in einem bestehenden Container erst nach dem nächsten
+Image-Build und Update sichtbar.
 
 Standardmäßig gehören alle Fotos des lokalen Tourtages zur Auswahl.
 **Beginn** und **Ende** grenzen diese nach dem Aufnahmezeitpunkt ein; Beginn

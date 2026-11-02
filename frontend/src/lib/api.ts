@@ -239,6 +239,11 @@ export const api = {
   }
 };
 
+export function initialAlbumTour(tours: Tour[], requestedId: string | null, overview: boolean): Tour | null {
+  if (tours.length === 1) return tours[0];
+  return overview ? null : tours.find((tour) => tour.id === requestedId) ?? null;
+}
+
 export function emptyTour(): Tour {
   return {
     title: "",
