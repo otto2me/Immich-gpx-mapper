@@ -7,6 +7,27 @@
 			"command": "$env:PATH='C:\\Users\\Oli\\AppData\\Local\\Programs\\nodejs-26.13.0;' + $env:PATH\n& 'C:\\Users\\Oli\\AppData\\Local\\Programs\\nodejs-26.13.0\\npm.cmd' run build --workspace backend\nif ($LASTEXITCODE -ne 0) {throw 'Backend build failed'}\n& 'C:\\Users\\Oli\\AppData\\Local\\Programs\\nodejs-26.13.0\\node.exe' --test backend/test/report-shares.test.mjs backend/test/reports.test.mjs backend/test/tours.test.mjs\nif ($LASTEXITCODE -ne 0) {throw 'Share regression failed'}",
 			"isBackground": false,
 			"problemMatcher": []
+		},
+		{
+			"label": "Build report share UI and regression suite",
+			"type": "shell",
+			"command": "$env:PATH='C:\\Users\\Oli\\AppData\\Local\\Programs\\nodejs-26.13.0;' + $env:PATH\n& 'C:\\Users\\Oli\\AppData\\Local\\Programs\\nodejs-26.13.0\\npm.cmd' run build\nif ($LASTEXITCODE -ne 0) {throw 'Build failed'}\n& 'C:\\Users\\Oli\\AppData\\Local\\Programs\\nodejs-26.13.0\\node.exe' --test backend/test/report-shares.test.mjs backend/test/reports.test.mjs backend/test/tours.test.mjs\nif ($LASTEXITCODE -ne 0) {throw 'Regression tests failed'}",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Build final share-link reader",
+			"type": "shell",
+			"command": "$env:PATH='C:\\Users\\Oli\\AppData\\Local\\Programs\\nodejs-26.13.0;' + $env:PATH\n& 'C:\\Users\\Oli\\AppData\\Local\\Programs\\nodejs-26.13.0\\npm.cmd' run build --workspace frontend\nif ($LASTEXITCODE -ne 0) {throw 'Frontend build failed'}",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Run report share-link preview",
+			"type": "shell",
+			"command": "$listeners=Get-NetTCPConnection -LocalPort 3033 -State Listen -ErrorAction SilentlyContinue\nforeach ($listener in $listeners) {\n$process=Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -eq $listener.OwningProcess }\nif ($process.CommandLine -notlike '*backend/dist/server.js*') {throw 'Port 3033 is used by another process'}\nStop-Process -Id $listener.OwningProcess\n}\n$env:PATH='C:\\Users\\Oli\\AppData\\Local\\Programs\\nodejs-26.13.0;' + $env:PATH\n$env:PORT='3033'\n$env:HOST='127.0.0.1'\n$env:APP_PASSWORD='LocalTourPreview123!'\n$env:DATA_DIR=Join-Path $env:TEMP 'immich-gpx-mapper-multitour-preview'\n$env:STATIC_DIR=Join-Path $PWD 'frontend/build'\n& 'C:\\Users\\Oli\\AppData\\Local\\Programs\\nodejs-26.13.0\\node.exe' backend/dist/server.js",
+			"isBackground": true,
+			"problemMatcher": []
 		}
 	]
 }

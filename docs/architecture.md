@@ -192,26 +192,57 @@ Während des Speicherns sind diese Navigationsaktionen gesperrt.
 
 Grenzen der ersten Version: höchstens 100 Kapitel, 100 Fotos je Kapitel und
 500 Fotoeinträge insgesamt; der Anfragebody ist auf 1.000.000 Bytes begrenzt.
-Es gibt keinen HTML-/Markdown-Editor und noch keine tokenbasierten
-Berichtsfreigaben. Jede gespeicherte Version ist für Mapper-Besucher lesbar.
+Es gibt keinen HTML-/Markdown-Editor. Jede gespeicherte Version ist für
+Mapper-Besucher lesbar, sowohl regulär als auch über einen aktiven Freigabelink.
 Der Berichts-Deep-Link lautet
 `/?album=<Album-ID>&view=report`.
 
-Bestätigte Anforderung für das Teilen: Ein Reisebericht soll ohne Anmeldung
-über einen widerrufbaren Freigabelink lesbar sein. Der Link berechtigt nur
-zum Lesen des freigegebenen Berichts und seiner ausdrücklich ausgewählten
-Medien, nicht zum übrigen Album oder zu Schreibzugriffen. Bericht und
-Medienabrufe benötigen dieselbe serverseitige Freigabeprüfung; nach dem
-Widerruf sind weitere Abrufe zu verweigern. Bereits heruntergeladene Inhalte
-lassen sich dadurch nicht zurückholen. Der bestehende gemeinsame API-Key
-ist keine Zugriffskontrolle für einzelne Reiseberichte.
+### Freigabelinks im offenen Lesemodus
 
+Bestätigte Entscheidung: Das offene Lesen bleibt bestehen. Ein Widerruf
+deaktiviert den konkreten Freigabelink, nicht den normalen Album-/Berichtszugriff.
 Die bisherigen allgemeinen Album- und Medien-Leserouten bleiben unverändert.
-Ein späterer ausschließlich linkgebundener Zugriff würde eine gemeinsame
-Abgrenzung der Berichts-, Album- und Medien-Leserouten erfordern. Im aktuell
-gewünschten offenen Lesemodus kann ein Linkwiderruf allein nicht den Zugriff
-über die normale Albumansicht verhindern. Der Freigabemodus ist vor seiner
-Umsetzung entsprechend abzustimmen.
+Dies ist keine tokenbasierte Zugriffssperre für sämtliche Berichtsinhalte.
+
+```sql
+CREATE TABLE report_shares (
+  id TEXT PRIMARY KEY,
+  report_id TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT,
+  revoked_at TEXT
+);
+CREATE INDEX report_shares_report ON report_shares(report_id);
+```
+
+Erstellen, Auflisten und Widerrufen erfordern die Mapper-Sitzung. Eine
+Freigabe referenziert einen bereits gespeicherten Bericht. Der zufällige
+Schlüssel hat 32 Bytes Entropie und wird in SQLite ausschließlich als
+SHA-256-Hash gespeichert. Der Klartext wird nur beim Erstellen zurückgegeben,
+nicht in der Linkliste. Ein verlorener Link muss neu erstellt werden.
+
+Der Browser erzeugt aus seinem Origin `/#share=<Schlüssel>`. Der Fragmentteil
+wird nicht im HTTP-Anfragepfad an den Server geschickt. Der Reader sendet den
+Schlüssel als `Authorization: Bearer ...` an `GET /api/shared-report`. Schlüssel
+sollen weder in Logs noch in Dokumentation stehen. Die eigene Linkansicht
+setzt Referrer-/Robots-Metadaten und zeigt keine Bearbeitungswerkzeuge.
+
+Die Lese-API prüft den Hash, `revoked_at` und die optionale Ablaufzeit bei
+jedem Abruf. Ungültige, abgelaufene und widerrufene Links erhalten identisch
+HTTP 404. Antworten verwenden `Cache-Control: no-store`; die Link-Lese-API
+setzt zusätzlich `X-Robots-Tag: noindex, nofollow`. Geliefert wird die aktuell
+gespeicherte Berichtsversion mit ihren Tourverweisen, kein eingefrorener Stand.
+Eine Freigabe erzeugt keinerlei Schreibberechtigung. Widerrufen ist idempotent
+und prüft die Albumzugehörigkeit der Freigabe.
+
+Beim Öffnen oder Neuladen eines widerrufenen Links wird der Bericht nicht
+mehr angezeigt. Bereits beim Empfänger geladene oder gespeicherte Inhalte
+lassen sich nicht zurückholen; ebenso bleiben die normalen offenen Medien-
+und Albumrouten erreichbar. Ein zukünftiger ausschließlich linkgebundener
+Modus müsste diese Routen gemeinsam absichern und wäre eine andere
+Zugriffsregel als die aktuell gewählte.
 
 ## Benutzer und Immich-Berechtigungen
 
@@ -276,6 +307,10 @@ regulären Screenshot-Endpunkt erfolgreich aufgenommen und gespeichert.
 | `POST` | `/api/albums/:albumId/tours` | Tour mit Datum und Zeitzone anlegen |
 | `GET` | `/api/albums/:albumId/report` | Gespeicherten Bericht ohne Anmeldung lesen |
 | `PUT` | `/api/albums/:albumId/report` | Validierten Bericht mit Versionsprüfung speichern |
+| `GET` | `/api/albums/:albumId/report/shares` | Linkmetadaten lesen; Anmeldung erforderlich |
+| `POST` | `/api/albums/:albumId/report/shares` | Freigabelink erstellen; Schlüssel einmalig ausgeben |
+| `POST` | `/api/albums/:albumId/report/shares/:shareId/revoke` | Link innerhalb seines Albums widerrufen |
+| `GET` | `/api/shared-report` | Aktuellen Bericht für einen gültigen Bearer-Linkschlüssel lesen |
 | `GET` | `/api/albums/:albumId/assets` | Fotoseite; optional nach `tourId` filtern |
 | `GET` | `/api/albums/:albumId/map-markers` | Foto-Standorte; optional nach `tourId` filtern |
 | `GET` | `/api/assets/:assetId/thumbnail` | Immich-Vorschaubild serverseitig abrufen |

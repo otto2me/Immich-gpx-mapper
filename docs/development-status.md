@@ -13,8 +13,46 @@ App-Passwort geschützt.
 Mehrere Touren je Album mit Datumsnavigation, optionalen Zeitfenstern und
 gemeinsamer Foto-/Kartenfilterung sind umgesetzt und lokal geprüft.
 Der Reisebericht mit Kapitel-Editor und Lesevorschau ist ebenfalls umgesetzt
-und lokal geprüft. Widerrufbare Freigabelinks ohne Anmeldung bleiben der
-nächste, noch nicht implementierte Schritt.
+und lokal geprüft. Verwaltbare Freigabelinks mit optionaler Ablaufzeit und
+Widerruf sind ebenfalls umgesetzt. Der normale Albumbericht bleibt bewusst
+ohne Anmeldung lesbar.
+
+## Kompaktere Berichtsansicht
+
+- Kapitelbilder stehen am Desktop in zwei Spalten, auf schmalen Bildschirmen
+  bis 600 Pixeln in einer Spalte. Die Bildflächen sind auf 240 beziehungsweise
+  220 Pixel Höhe begrenzt, statt Bilder einzeln bis 750 Pixel hoch zu zeigen.
+- Bilder bleiben durch `object-fit: contain` vollständig sichtbar;
+  Bildunterschriften stehen direkt darunter. Ein Klick öffnet die große
+  Immich-Vorschau in einem neuen Tab. Eingebettete Tourkarten sind ebenfalls
+  auf eine kompaktere Höhe begrenzt.
+- Die Darstellung gilt gemeinsam für normale Berichts- und Linkansichten;
+  gespeicherte Inhalte und die Bildauswahl werden nicht verändert.
+
+## Freigabelinks: Umsetzung und Prüfung
+
+- Linkverwaltung über **Teilen** bei einem gespeicherten Bericht:
+  Bezeichnung, optionale Ablaufzeit, Erstellen, einmaliges Kopieren und Widerruf.
+- Zufällige Linkschlüssel aus 32 Bytes werden nur als SHA-256-Hash gespeichert.
+  Die Metadatenliste enthält weder Schlüssel noch Hash. Link-URLs verwenden
+  den Fragmentteil; der Reader sendet den Schlüssel per Authorization-Header.
+- Die Linkansicht zeigt die neueste gespeicherte Berichtsversion, ohne Login-
+  und Bearbeitungswerkzeuge. Ungültige, abgelaufene und widerrufene Links
+  erhalten dieselbe HTTP-404-Meldung; Antworten sind `no-store`.
+- Ausdrücklich bestätigt: Offenes Lesen beibehalten. Widerruf deaktiviert
+  nur diesen Link. Die normale Albumansicht und allgemeine Medienrouten
+  bleiben unabhängig davon erreichbar; keine falsche private Freigabegarantie.
+- Gesamtbuild und fünf Regressionstests erfolgreich. Die neue Suite prüft
+  Hash-Speicherung, fehlende/ungültige Schlüssel, aktuelle Berichtsversion,
+  Ablauf, Widerruf, wiederholten Widerruf, Albumzugehörigkeit und Schreibschutz.
+- Browserprüfung: Link erstellt und erfolgreich kopiert, Lesen mit
+  ausgelassener Sitzung HTTP 200; Linkansicht mit zwei Kapiteln und zwei Fotos
+  ohne Editor. Linkverwaltung bei 390 Pixeln ohne horizontalen Überlauf.
+  Nach UI-Widerruf zeigt derselbe Testlink nur die Ungültigkeitsmeldung,
+  während die normale anonyme Album-Berichtsroute weiterhin HTTP 200 liefert.
+- Keine Veröffentlichung oder Änderung an produktiven Immich-Daten durch
+  diese lokale Prüfung. Externe Links müssen über eine erreichbare Mapper-
+  Adresse erzeugt werden; localhost-Links sind nur lokal nutzbar.
 
 ## Reisebericht: Umsetzung und Prüfung
 
@@ -26,7 +64,7 @@ nächste, noch nicht implementierte Schritt.
 - Persistenz in der neuen SQLite-Tabelle `reports`; bestehende Tourdaten
   werden nicht verändert. Bilder bleiben Referenzen auf Immich-Assets.
 - Bericht ist ohne Anmeldung lesbar; Schreiben erfordert die gemeinsame
-  Mapper-Sitzung. Noch keine Freigabetokens. „Reisebericht“ steht vor
+  Mapper-Sitzung. „Reisebericht“ steht vor
   „Touren“ und ist die Standardansicht; explizite Tour-Links bleiben erhalten.
 - Bearbeitungswerkzeuge erscheinen nur nach Anmeldung. Beim An-/Abmelden
   wird die Berichtsansicht neu geladen, damit ausgeloggte Besucher nur die
@@ -51,9 +89,8 @@ nächste, noch nicht implementierte Schritt.
 - Icon-Werkzeuge nutzen das gepflegte Paket `@lucide/svelte`. npm meldet
   weiterhin sechs niedrige Dependency-Advisories; kein erzwungenes Audit-Fix
   oder sachfremdes Dependency-Upgrade vorgenommen.
-- Noch offen: Freigabelinks und deren Verhältnis zum ausdrücklich gewünschten
-  offenen Lesemodus. Ein Linkwiderruf allein sperrt die normale Albumansicht
-  nicht; ein ausschließlich linkgebundener Modus erfordert weitere Regeln.
+- Der offene Lesemodus bleibt auch nach Einführung der Freigabelinks erhalten.
+  Ein ausschließlich linkgebundener Modus ist nicht Teil dieser Umsetzung.
 
 ## Mehrtag-Alben: Umsetzung und Prüfung
 
@@ -90,7 +127,7 @@ Tests nach einem Build ausführen:
 
 ```sh
 npm run build
-node --test backend/test/tours.test.mjs backend/test/reports.test.mjs
+node --test backend/test/tours.test.mjs backend/test/reports.test.mjs backend/test/report-shares.test.mjs
 ```
 
 ## Aktualisierung vom 02.11.2026
@@ -228,6 +265,9 @@ node --test backend/test/tours.test.mjs backend/test/reports.test.mjs
 - `backend/src/auth.ts`
 - `backend/test/reports.test.mjs`
 - `frontend/src/lib/ReportEditor.svelte`
+- `frontend/src/lib/ReportSharing.svelte`
+- `frontend/src/lib/SharedReport.svelte`
+- `backend/test/report-shares.test.mjs`
 - `backend/package.json`
 - `package-lock.json`
 - `docs/architecture.md`
@@ -265,7 +305,8 @@ node --test backend/test/tours.test.mjs backend/test/reports.test.mjs
 Die commit-basierte Footer-Version, lokale Komoot-Screenshots und die
 Logout-Korrektur sowie mehrere Touren pro Album mit zeitbasierter
 Fotozuordnung und Reiseberichts-Entwürfe sind implementiert und geprüft.
-Öffentliche Freigabelinks sind noch nicht implementiert.
+Verwaltbare Freigabelinks sind umgesetzt; ihr Widerruf lässt den ausdrücklich
+gewünschten normalen offenen Lesezugriff unverändert.
 
 ## Noch offene Integrationsprüfungen
 

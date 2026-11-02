@@ -22,7 +22,12 @@ test("share links are hashed, expire and revoke independently of the open album 
     const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { password: "ShareTestPassword123!" } });
     const headers = { cookie: login.headers["set-cookie"].split(";")[0] };
     assert.equal((await app.inject({ method: "POST", url: `${base}/shares`, headers, payload: {} })).statusCode, 404);
-    await app.inject({ method: "PUT", url: base, headers, payload: { title: "Trip", introduction: "First", chapters: [], revision: 0 } });
+    const insertTour = database.prepare("INSERT INTO tours(id, immich_album_id, tour_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?)");
+    insertTour.run("selected-tour", "album", "2026-01-01", "now", "now");
+    insertTour.run("unused-tour", "album", "2026-01-02", "now", "now");
+    insertTour.run("foreign-tour", "other", "2026-01-01", "now", "now");
+    const chapters = [{ id: "chapter", title: "Day", date: null, text: "", tourId: "selected-tour", photos: [] }];
+    await app.inject({ method: "PUT", url: base, headers, payload: { title: "Trip", introduction: "First", chapters, revision: 0 } });
     const created = await app.inject({ method: "POST", url: `${base}/shares`, headers, payload: { label: "Family" } });
     assert.equal(created.statusCode, 201);
     const { token, share } = created.json();
@@ -35,8 +40,10 @@ test("share links are hashed, expire and revoke independently of the open album 
     assert.ok(!listed.body.includes(stored.token_hash));
     const read = () => app.inject({ url: "/api/shared-report", headers: { authorization: `Bearer ${token}` } });
     assert.equal((await read()).statusCode, 200);
+    assert.deepEqual((await read()).json().tours.map(tour => tour.id), ["selected-tour"]);
     await app.inject({ method: "PUT", url: base, headers, payload: { title: "Trip updated", introduction: "Latest", chapters: [], revision: 1 } });
     assert.equal((await read()).json().report.title, "Trip updated");
+    assert.deepEqual((await read()).json().tours, []);
     assert.equal((await app.inject({ url: "/api/shared-report" })).statusCode, 404);
     assert.equal((await app.inject({ url: "/api/shared-report", headers: { authorization: `Bearer ${"x".repeat(43)}` } })).statusCode, 404);
     const revokeUrl = `${base}/shares/${share.id}/revoke`;

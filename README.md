@@ -149,7 +149,9 @@ die angegebene Tour.
 4. Über **Fotos auswählen** einzelne Albumfotos hinzufügen. Die Auswahl ist
    paginiert und kann auf eine Tour eingegrenzt werden.
 5. Bildunterschriften ergänzen und Kapitel oder Fotos mit den Pfeilen sortieren.
-6. **Vorschau** zeigt den Bericht mit großen Bildern und Tourverweisen.
+6. **Vorschau** zeigt den Bericht mit einer kompakten Fotoübersicht und
+   Tourverweisen. Am Desktop stehen Fotos nebeneinander, mobil untereinander.
+   Ein Klick öffnet das Foto in großer Ansicht in einem neuen Tab.
 7. Mit **Speichern** den Bericht dauerhaft ablegen; die gespeicherte Version
    ist anschließend auch ohne Anmeldung sichtbar.
 
@@ -162,8 +164,32 @@ Bei veralteten Bearbeitungen aus einem zweiten Tab wird das Speichern mit
 einem Konflikt abgewiesen, ohne den lokalen Text zu verwerfen. Vor dem
 Neuladen einer gespeicherten Version gegebenenfalls den eigenen Text sichern.
 Nur das Bearbeiten und Speichern erfordert die gemeinsame Mapper-Anmeldung.
-Widerrufbare öffentliche Freigabelinks sind der nächste, noch nicht
-implementierte Schritt.
+
+### Reisebericht teilen
+
+Nach der Anmeldung beim gespeicherten Bericht **Teilen** öffnen. Eine
+Bezeichnung und optional eine Ablaufzeit in der lokalen Browserzeitzone
+angeben, anschließend **Link erstellen** wählen. Der neue Link wird nur
+einmal vollständig angezeigt und kann mit **Link kopieren** übernommen
+werden. Ohne Zwischenablage-Unterstützung wird das Feld zum Kopieren markiert.
+Später sind in der Liste nur Bezeichnung, Status und Zeitangaben verfügbar;
+bei verlorenem Link einen neuen erstellen und den alten widerrufen.
+
+Der Link zeigt die jeweils zuletzt gespeicherte Berichtsversion ohne
+Bearbeitungswerkzeuge. Anmeldung ist zum Lesen nicht nötig. **Widerrufen**
+deaktiviert genau diesen Link; eine gesetzte Ablaufzeit macht ihn ebenfalls
+ungültig. Bereits geladene oder heruntergeladene Inhalte bleiben beim Empfänger.
+
+**Wichtig:** Das ausdrücklich gewünschte offene Lesen bleibt bestehen.
+Ein Widerruf sperrt nicht den normalen Zugriff auf das Album und seinen
+Bericht. Diese Links sind daher keine Zugriffssperre für ansonsten private
+Inhalte.
+
+Zum externen Teilen die von den Empfängern erreichbare Mapper-Adresse im
+Browser öffnen und dort den Link erzeugen. Ein Link mit `localhost` ist nur
+auf dem eigenen Rechner nutzbar. Das Fragment `#share=...` muss vollständig
+mitkopiert werden; der Linkschlüssel wird von der Anwendung per Header an
+die Lese-API gesendet und in der Datenbank nur als Hash gespeichert.
 
 Die Tourart (Wanderung oder Fahrradtour) lässt sich beim Bearbeiten eines Albums
 festlegen. Sie wird gemeinsam mit den übrigen Tourdaten gespeichert.

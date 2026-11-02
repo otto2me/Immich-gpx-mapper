@@ -74,6 +74,16 @@ export type TravelReport = {
   updatedAt?: string;
 };
 
+export type ReportShare = {
+  id: string;
+  label: string;
+  createdAt: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+};
+
+export type SharedReportData = { report: TravelReport; albumId: string; tours: Tour[] };
+
 export type KomootPreview = {
   title: string;
   description: string;
@@ -152,6 +162,16 @@ export const api = {
     request<AlbumAssetPage>(`/api/albums/${encodeURIComponent(id)}/assets?${new URLSearchParams({ page: String(page), ...(tourId ? { tourId } : {}) })}`),
   tours: (id: string) => request<Tour[]>(`/api/albums/${encodeURIComponent(id)}/tours`),
   report: (id: string) => request<TravelReport | null>(`/api/albums/${encodeURIComponent(id)}/report`),
+  reportShares: (id: string) => request<ReportShare[]>(`/api/albums/${encodeURIComponent(id)}/report/shares`),
+  createReportShare: (id: string, label: string, expiresAt: string | null) =>
+    request<{ share: ReportShare; token: string }>(`/api/albums/${encodeURIComponent(id)}/report/shares`, {
+      method: "POST", body: JSON.stringify({ label, expiresAt })
+    }),
+  revokeReportShare: (albumId: string, shareId: string) =>
+    request<{ revoked: boolean }>(`/api/albums/${encodeURIComponent(albumId)}/report/shares/${encodeURIComponent(shareId)}/revoke`, { method: "POST" }),
+  sharedReport: (token: string) => request<SharedReportData>("/api/shared-report", {
+    headers: { authorization: `Bearer ${token}` }
+  }),
   saveReport: (id: string, report: TravelReport) => request<TravelReport>(`/api/albums/${encodeURIComponent(id)}/report`, {
     method: "PUT", body: JSON.stringify(report)
   }),

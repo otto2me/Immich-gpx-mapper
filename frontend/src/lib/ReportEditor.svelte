@@ -2,9 +2,11 @@
   import { onMount } from "svelte";
   import { ArrowUp, ArrowDown, Trash2, Plus, Images, X, Check, Save, RefreshCw } from "@lucide/svelte";
   import { api, tourResource, type Album, type Asset, type Tour, type TravelReport, type ReportChapter } from "./api.js";
+  import ReportSharing from "./ReportSharing.svelte";
 
-  let { album, tours, canEdit, onOpenTour, dirty = $bindable(false), saving = $bindable(false) }: {
-    album: Album; tours: Tour[]; canEdit: boolean; onOpenTour: (id: string) => void | Promise<void>; dirty?: boolean; saving?: boolean
+  let { album, tours, canEdit, onOpenTour, loadReport, dirty = $bindable(false), saving = $bindable(false) }: {
+    album: Album; tours: Tour[]; canEdit: boolean; onOpenTour: (id: string) => void | Promise<void>;
+    loadReport?: () => Promise<TravelReport | null>; dirty?: boolean; saving?: boolean
   } = $props();
   let draft = $state<TravelReport>({ title: "", introduction: "", chapters: [], revision: 0 });
   let savedSnapshot = $state("");
@@ -36,12 +38,13 @@
     error = "";
     notice = "";
     try {
-      const saved = await api.report(album.id);
+      const saved = await (loadReport ? loadReport() : api.report(album.id));
       draft = saved ?? { title: album.albumName, introduction: "", chapters: [], revision: 0 };
       savedSnapshot = JSON.stringify(draft);
       loaded = true;
       pickerChapterId = null;
     } catch (reason) {
+      if (loadReport) loaded = false;
       error = message(reason);
     } finally {
       loading = false;
@@ -162,6 +165,7 @@
     </div>
   </header>
 
+  {#if canEdit && draft.revision > 0}<ReportSharing albumId={album.id} />{/if}
   {#if error}<p class="report-error" role="alert">{error}</p>{/if}
   {#if notice}<p class="report-notice" role="status">{notice}</p>{/if}
   {#if loading}
@@ -253,9 +257,18 @@
                 </div>
               {/if}
             {/if}
-            {#each chapter.photos as photo (photo.assetId)}
-              <figure><img src={image(photo.assetId, true)} alt={photo.caption || chapter.title || "Reisefoto"} loading="lazy" />{#if photo.caption}<figcaption>{photo.caption}</figcaption>{/if}</figure>
-            {/each}
+            {#if chapter.photos.length}
+              <div class="story-photos">
+                {#each chapter.photos as photo (photo.assetId)}
+                  <figure>
+                    <a class="story-photo-link" href={image(photo.assetId, true)} target="_blank" rel="noreferrer" title="Foto vergrößern">
+                      <img src={image(photo.assetId, true)} alt={photo.caption || chapter.title || "Reisefoto"} loading="lazy" />
+                    </a>
+                    {#if photo.caption}<figcaption>{photo.caption}</figcaption>{/if}
+                  </figure>
+                {/each}
+              </div>
+            {/if}
           </section>
         {/each}
         {#if !draft.chapters.length}<p>Noch keine Kapitel vorhanden.</p>{/if}
@@ -318,13 +331,18 @@
   .story-chapter { padding-top: 36px; }
   .story-chapter h3 { font-family: Georgia, serif; font-size: 25px; line-height: 1.3; margin: 10px 0 18px; }
   time { color: var(--report-muted); font-size: 14px; }
-  figure { margin: 28px 0; }
-  figure img, .story-tour img { display: block; width: 100%; max-height: 750px; object-fit: contain; }
-  figcaption { margin-top: 10px; text-align: center; color: var(--report-muted); font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .story-photos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 16px; margin: 20px 0; }
+  figure { min-width: 0; margin: 0; }
+  .story-photo-link { display: grid; place-items: center; width: 100%; aspect-ratio: 4 / 3; max-height: 240px; overflow: hidden; border-radius: 4px; background: #edf1ec; cursor: zoom-in; }
+  .story-photo-link img { display: block; width: 100%; height: 100%; min-height: 0; object-fit: contain; }
+  .story-tour img { display: block; width: 100%; max-height: 300px; object-fit: contain; }
+  figcaption { margin-top: 8px; text-align: center; color: var(--report-muted); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .story-tour { display: grid; gap: 10px; padding: 16px 0; border-block: 1px solid var(--report-line); }
   .story-tour a { color: #256d43; font-weight: 600; overflow-wrap: anywhere; }
   .story-tour span { color: var(--report-muted); font-size: 14px; }
   @media (max-width: 600px) {
+    .story-photos { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+    .story-photo-link { max-height: 220px; }
     .chapter-fields { grid-template-columns: minmax(0, 1fr); }
     .report-actions { width: 100%; }
     .selected-photo { grid-template-columns: 75px minmax(0, 1fr); }

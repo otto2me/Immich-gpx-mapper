@@ -4,6 +4,7 @@
   import "leaflet/dist/leaflet.css";
   import GpxMap from "../lib/GpxMap.svelte";
   import ReportEditor from "../lib/ReportEditor.svelte";
+  import SharedReport from "../lib/SharedReport.svelte";
   import {
     api,
     emptyTour,
@@ -23,6 +24,7 @@
   let komootLinkedAlbumIds = $state<string[]>([]);
   let albumsPage = $state(1);
   let selectedAlbum = $state<Album | null>(null);
+  let shareToken = $state("");
   let albumView = $state<"tours" | "report">("report");
   let reportDirty = $state(false);
   let reportSaving = $state(false);
@@ -282,6 +284,8 @@
   }
 
   async function initialize() {
+    shareToken = new URLSearchParams(location.hash.slice(1)).get("share") ?? "";
+    if (shareToken) { loading = false; return; }
     try {
       immichWebUrl = (await api.publicConfig()).immichWebUrl;
     } catch {
@@ -301,6 +305,10 @@
   }
 
   function syncFromLocation() {
+    const previousShare = shareToken;
+    shareToken = new URLSearchParams(location.hash.slice(1)).get("share") ?? "";
+    if (shareToken) { selectedAlbum = null; return; }
+    if (previousShare) { void initialize(); return; }
     const albumId = new URLSearchParams(location.search).get("album");
     if (albumId) void loadAlbum(albumId);
     else {
@@ -312,7 +320,11 @@
   onMount(() => {
     void initialize();
     window.addEventListener("popstate", syncFromLocation);
-    return () => window.removeEventListener("popstate", syncFromLocation);
+    window.addEventListener("hashchange", syncFromLocation);
+    return () => {
+      window.removeEventListener("popstate", syncFromLocation);
+      window.removeEventListener("hashchange", syncFromLocation);
+    };
   });
 
   async function openAlbum(album: Album) {
@@ -324,11 +336,14 @@
     if (reportSaving) return;
     if (reportDirty && !confirm("Ungespeicherte Änderungen am Reisebericht verwerfen?")) return;
     reportDirty = false;
+    const leavingShare = Boolean(shareToken);
+    shareToken = "";
     ++albumRevision;
     ++selectionRevision;
     pushState("/", {});
     selectedAlbum = null;
-    void loadAlbums();
+    if (leavingShare) void initialize();
+    else void loadAlbums();
   }
 
   async function login(event: SubmitEvent) {
@@ -506,6 +521,10 @@
 
 <svelte:head>
   <title>Immich GPX Mapper</title>
+  {#if shareToken}
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="referrer" content="no-referrer" />
+  {/if}
   <meta
     name="description"
     content="Tour-Informationen und GPX-Tracks zu Immich-Alben"
@@ -517,7 +536,7 @@
     <span class="brand-mark">↗</span>
     <span>Immich <strong>GPX Mapper</strong></span>
   </a>
-  <div class="auth">
+  {#if !shareToken}<div class="auth">
     {#if authenticated}
       <span class="auth-state"><span class="dot"></span> Bearbeitungsmodus</span>
       <button class="quiet-button" disabled={reportSaving} onclick={logout}>Abmelden</button>
@@ -536,7 +555,7 @@
         </button>
       </form>
     {/if}
-  </div>
+  </div>{/if}
 </header>
 
 <main>
@@ -553,7 +572,9 @@
     </div>
   {/if}
 
-  {#if selectedAlbum}
+  {#if shareToken}
+    {#key shareToken}<SharedReport token={shareToken} />{/key}
+  {:else if selectedAlbum}
     <button class="back-link" disabled={reportSaving} onclick={backToAlbums}>← Alle Alben</button>
     <section class="album-heading">
       <div>

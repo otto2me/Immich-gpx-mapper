@@ -19,7 +19,8 @@
 ○ Reisebericht pro Album mit Titel, Einleitung und sortierbaren Kapiteln aus Texten, ausgewählten Fotos, Bildunterschriften und Tourverweisen
 ○ Reisebericht vor Touren und als Standardansicht; gespeicherte Berichte ohne Anmeldung lesbar, Bearbeiten/Speichern nur mit Mapper-Anmeldung
 ○ Berichtseditor und Lesevorschau; Versionsprüfung gegen unbeabsichtigtes Überschreiben
-○ Bericht ohne Anmeldung über widerrufbaren Freigabelink teilen; Zugriff nur auf ausgewählte Inhalte (geplant)
+○ Bericht ohne Anmeldung über verwaltbare Freigabelinks teilen, mit Bezeichnung, optionaler Ablaufzeit, Kopieren und Widerruf
+○ Offenes Lesen beibehalten: Widerruf deaktiviert nur den Link, nicht den normalen Album-/Berichtszugriff; Linkansicht ohne Bearbeitungswerkzeuge
 ○ Beschreibung
 ○ Kommentare
 ○ Richtung der Wanderung
