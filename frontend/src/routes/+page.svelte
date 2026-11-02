@@ -3,6 +3,7 @@
   import { pushState } from "$app/navigation";
   import "leaflet/dist/leaflet.css";
   import GpxMap from "../lib/GpxMap.svelte";
+  import ReportEditor from "../lib/ReportEditor.svelte";
   import {
     api,
     emptyTour,
@@ -22,6 +23,9 @@
   let komootLinkedAlbumIds = $state<string[]>([]);
   let albumsPage = $state(1);
   let selectedAlbum = $state<Album | null>(null);
+  let albumView = $state<"tours" | "report">("report");
+  let reportDirty = $state(false);
+  let reportSaving = $state(false);
   let tours = $state<Tour[]>([]);
   let selectedTourId = $state<string | null>(null);
   let selectingTour = $state(false);
@@ -131,6 +135,7 @@
       tours = savedTours;
       addingTour = false;
       const params = new URLSearchParams(location.search);
+      albumView = params.has("tour") || ["overview", "tours"].includes(params.get("view") ?? "") ? "tours" : "report";
       const requestedTour = params.get("tour");
       const initialTour = params.get("view") === "overview" ? null :
         savedTours.find((item) => item.id === requestedTour) ??
@@ -316,6 +321,9 @@
   }
 
   function backToAlbums() {
+    if (reportSaving) return;
+    if (reportDirty && !confirm("Ungespeicherte Änderungen am Reisebericht verwerfen?")) return;
+    reportDirty = false;
     ++albumRevision;
     ++selectionRevision;
     pushState("/", {});
@@ -340,9 +348,12 @@
   }
 
   async function logout() {
+    if (reportSaving) return;
+    if (reportDirty && !confirm("Ungespeicherte Änderungen am Reisebericht verwerfen und abmelden?")) return;
     try {
       await api.logout();
       authenticated = false;
+      reportDirty = false;
       notice = "Du wurdest abgemeldet.";
     } catch (reason) {
       error = message(reason);
@@ -470,6 +481,27 @@
   function assetTitle(asset: Asset) {
     return asset.originalFileName ?? "Immich-Foto";
   }
+
+  function switchAlbumView(view: "tours" | "report") {
+    if (reportSaving) return;
+    if (view === albumView) return;
+    if (reportDirty && !confirm("Ungespeicherte Änderungen am Reisebericht verwerfen?")) return;
+    reportDirty = false;
+    albumView = view;
+    const params = new URLSearchParams({ album: selectedAlbum!.id });
+    if (view === "report") params.set("view", "report");
+    else if (selectedTourId) params.set("tour", selectedTourId);
+    else params.set("view", "overview");
+    pushState(`/?${params}`, {});
+  }
+
+  async function openReportTour(id: string) {
+    if (reportSaving) return;
+    if (reportDirty && !confirm("Ungespeicherte Änderungen am Reisebericht verwerfen?")) return;
+    reportDirty = false;
+    albumView = "tours";
+    await selectTour(id);
+  }
 </script>
 
 <svelte:head>
@@ -488,7 +520,7 @@
   <div class="auth">
     {#if authenticated}
       <span class="auth-state"><span class="dot"></span> Bearbeitungsmodus</span>
-      <button class="quiet-button" onclick={logout}>Abmelden</button>
+      <button class="quiet-button" disabled={reportSaving} onclick={logout}>Abmelden</button>
     {:else}
       <form class="login-form" onsubmit={login}>
         <label class="sr-only" for="app-password">App-Passwort</label>
@@ -522,7 +554,7 @@
   {/if}
 
   {#if selectedAlbum}
-    <button class="back-link" onclick={backToAlbums}>← Alle Alben</button>
+    <button class="back-link" disabled={reportSaving} onclick={backToAlbums}>← Alle Alben</button>
     <section class="album-heading">
       <div>
         <p class="eyebrow">Immich-Album</p>
@@ -532,13 +564,21 @@
           {#if selectedAlbum.description} · {selectedAlbum.description}{/if}
         </p>
       </div>
-      {#if tour.komootLink}
+      {#if albumView === "tours" && tour.komootLink}
         <a class="komoot-button" href={tour.komootLink} target="_blank" rel="noreferrer">
           Tour in Komoot öffnen ↗
         </a>
       {/if}
     </section>
 
+    <div class="komoot-view-toggle album-view-toggle" role="group" aria-label="Albumansicht">
+      <button type="button" aria-pressed={albumView === "report"} class:active={albumView === "report"} disabled={busy || reportSaving} onclick={() => switchAlbumView("report")}>Reisebericht</button>
+      <button type="button" aria-pressed={albumView === "tours"} class:active={albumView === "tours"} disabled={busy || reportSaving} onclick={() => switchAlbumView("tours")}>Touren</button>
+    </div>
+
+    {#if albumView === "report"}
+      {#key `${selectedAlbum.id}:${authenticated}`}<ReportEditor album={selectedAlbum} {tours} canEdit={authenticated} onOpenTour={openReportTour} bind:dirty={reportDirty} bind:saving={reportSaving} />{/key}
+    {:else}
     <nav class="tour-navigation" aria-label="Touren im Album">
       <div class="tour-tabs" role="tablist" tabindex="-1" aria-label="Tagesauswahl" onkeydown={onTourTabKeydown}>
         <button type="button" role="tab" aria-selected={!selectedTourId} aria-controls="tour-content" tabindex={!selectedTourId ? 0 : -1} disabled={busy} onclick={() => selectTour(null)}>Übersicht</button>
@@ -995,6 +1035,7 @@
       </section>
     {/if}
     </div>
+    {/if}
   {:else}
     <section class="hero">
       <div>
@@ -1097,6 +1138,7 @@
 </footer>
 
 <style>
+  .album-view-toggle { margin: 24px 0 12px; }
   .tour-navigation { display: flex; align-items: center; gap: 12px; min-width: 0; margin: 20px 0; }
   .tour-tabs { display: flex; gap: 4px; overflow-x: auto; min-width: 0; flex: 1; border-bottom: 1px solid #d5ddd7; }
   .tour-tabs button { flex: 0 0 auto; min-height: 44px; padding: 8px 14px; border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; color: inherit; white-space: nowrap; }

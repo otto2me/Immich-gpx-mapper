@@ -115,5 +115,16 @@ export async function openDatabase(config: AppConfig) {
       database.exec("PRAGMA foreign_keys = ON");
     }
   }
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS reports (
+      id TEXT PRIMARY KEY,
+      immich_album_id TEXT NOT NULL UNIQUE,
+      title TEXT NOT NULL,
+      introduction TEXT NOT NULL DEFAULT '',
+      chapters_json TEXT NOT NULL DEFAULT '[]',
+      revision INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL
+    );
+  `);
   return database;
 }

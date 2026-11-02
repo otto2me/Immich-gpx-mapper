@@ -109,7 +109,7 @@ CREATE TABLE comments (
 Immich-Album- und Asset-Metadaten werden live über die Immich-API gelesen und
 nicht in der Mapper-Datenbank dupliziert.
 
-### Mehrtag-Alben und geplante Reiseberichte
+### Mehrtag-Alben und Reiseberichte
 
 Umgesetzt sind mehrere Touren je Album, aber
 höchstens eine Tour je Kalendertag innerhalb dieses Albums. Mehrere Touren am
@@ -152,11 +152,50 @@ gehören jeweils zur ausgewählten Tour. Tour-Deep-Links verwenden
 `/?album=<Album-ID>&tour=<Tour-ID>`, eine explizite Übersicht
 `/?album=<Album-ID>&view=overview`.
 
-Ein Reisebericht könnte auf Albumebene Texte, ausgewählte Immich-Fotos und
-Tourverweise zu Kapiteln verbinden. Fotos würden referenziert, nicht in neue
-Immich-Alben verschoben oder dupliziert. Vorschlag für die Reihenfolge:
-zunächst das Mehrtouren-Modell mit Datumsnavigation, anschließend der darauf
-aufbauende Bericht.
+Ein Reisebericht verbindet auf Albumebene Titel, Einleitung und sortierte
+Kapitel aus Datum, Text, ausgewählten Immich-Fotos mit Bildunterschriften
+und optionalem Tourverweis. Kapitel und Fotos lassen sich unabhängig
+sortieren und entfernen. Fotos werden nur referenziert, nicht kopiert oder
+in andere Immich-Alben verschoben. Die Editoransicht ist von der
+Lesevorschau getrennt. Texte werden als Klartext mit erhaltenen Absätzen
+gerendert, niemals als ungeprüftes HTML.
+
+```sql
+CREATE TABLE reports (
+  id TEXT PRIMARY KEY,
+  immich_album_id TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  introduction TEXT NOT NULL DEFAULT '',
+  chapters_json TEXT NOT NULL DEFAULT '[]',
+  revision INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL
+);
+```
+
+Die Reihenfolge der validierten Kapitel und Fotos wird im JSON-Dokument
+gespeichert. Jede Kapitel-ID ist innerhalb des Berichts eindeutig. Beim
+Speichern werden Tour- und Fotozugehörigkeit zum Album serverseitig geprüft;
+dafür werden erforderlichenfalls alle Immich-Metadatenseiten gelesen.
+Gespeicherte Berichte sind ausdrücklich ohne Anmeldung lesbar. Nur das
+Schreiben erfordert die vorhandene Mapper-Sitzung. Antworten verwenden
+`Cache-Control: no-store`. „Reisebericht“ steht in der Albumauswahl vor
+„Touren“ und ist die Standardansicht; direkte Tour- und Übersichtslinks
+bleiben erhalten. Die Leseansicht ist auch für angemeldete Besucher zunächst
+aktiv, Bearbeitungswerkzeuge erscheinen nur nach Anmeldung.
+
+Neue Berichte senden Revision 0, vorhandene ihre zuletzt geladene Revision.
+Eine erfolgreiche Speicherung erhöht die Version atomar. Eine veraltete
+Bearbeitung erhält HTTP 409; der Editor behält den lokalen Entwurf und bietet
+ein bewusstes Neuladen an. Eigene Navigationsaktionen fragen bei ungespeicherten
+Änderungen nach, und ein `beforeunload`-Handler schützt beim Verlassen der Seite.
+Während des Speicherns sind diese Navigationsaktionen gesperrt.
+
+Grenzen der ersten Version: höchstens 100 Kapitel, 100 Fotos je Kapitel und
+500 Fotoeinträge insgesamt; der Anfragebody ist auf 1.000.000 Bytes begrenzt.
+Es gibt keinen HTML-/Markdown-Editor und noch keine tokenbasierten
+Berichtsfreigaben. Jede gespeicherte Version ist für Mapper-Besucher lesbar.
+Der Berichts-Deep-Link lautet
+`/?album=<Album-ID>&view=report`.
 
 Bestätigte Anforderung für das Teilen: Ein Reisebericht soll ohne Anmeldung
 über einen widerrufbaren Freigabelink lesbar sein. Der Link berechtigt nur
@@ -166,6 +205,13 @@ Medienabrufe benötigen dieselbe serverseitige Freigabeprüfung; nach dem
 Widerruf sind weitere Abrufe zu verweigern. Bereits heruntergeladene Inhalte
 lassen sich dadurch nicht zurückholen. Der bestehende gemeinsame API-Key
 ist keine Zugriffskontrolle für einzelne Reiseberichte.
+
+Die bisherigen allgemeinen Album- und Medien-Leserouten bleiben unverändert.
+Ein späterer ausschließlich linkgebundener Zugriff würde eine gemeinsame
+Abgrenzung der Berichts-, Album- und Medien-Leserouten erfordern. Im aktuell
+gewünschten offenen Lesemodus kann ein Linkwiderruf allein nicht den Zugriff
+über die normale Albumansicht verhindern. Der Freigabemodus ist vor seiner
+Umsetzung entsprechend abzustimmen.
 
 ## Benutzer und Immich-Berechtigungen
 
@@ -228,6 +274,8 @@ regulären Screenshot-Endpunkt erfolgreich aufgenommen und gespeichert.
 | `GET` | `/api/albums/:albumId` | Album inklusive Assets abrufen |
 | `GET` | `/api/albums/:albumId/tours` | Touren des Albums auflisten |
 | `POST` | `/api/albums/:albumId/tours` | Tour mit Datum und Zeitzone anlegen |
+| `GET` | `/api/albums/:albumId/report` | Gespeicherten Bericht ohne Anmeldung lesen |
+| `PUT` | `/api/albums/:albumId/report` | Validierten Bericht mit Versionsprüfung speichern |
 | `GET` | `/api/albums/:albumId/assets` | Fotoseite; optional nach `tourId` filtern |
 | `GET` | `/api/albums/:albumId/map-markers` | Foto-Standorte; optional nach `tourId` filtern |
 | `GET` | `/api/assets/:assetId/thumbnail` | Immich-Vorschaubild serverseitig abrufen |

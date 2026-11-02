@@ -135,8 +135,35 @@ Vorhandene Touren bleiben nach der automatischen Datenbankmigration als
 Fotos ohne gültigen Aufnahmezeitpunkt bleiben in der Übersicht sichtbar.
 Vor einem produktiven Update das komplette Mapper-Datenverzeichnis sichern.
 
-Reiseberichte und widerrufbare öffentliche Freigabelinks sind geplant,
-aber noch nicht implementiert.
+### Reisebericht schreiben
+
+**Reisebericht** steht vor **Touren** und ist die Standardansicht eines Albums.
+Gespeicherte Berichte sind ohne Anmeldung lesbar. Zum Bearbeiten anmelden
+und **Bearbeiten** wählen. Der Bericht gilt für das gesamte Album,
+unabhängig vom ausgewählten Tourtag. Direkte Tour-Links öffnen weiterhin
+die angegebene Tour.
+
+1. Berichtstitel und Einleitung eingeben.
+2. Über **Kapitel hinzufügen** Abschnitte mit Titel, Datum und Text anlegen.
+3. Optional eine Tour aus demselben Album verknüpfen.
+4. Über **Fotos auswählen** einzelne Albumfotos hinzufügen. Die Auswahl ist
+   paginiert und kann auf eine Tour eingegrenzt werden.
+5. Bildunterschriften ergänzen und Kapitel oder Fotos mit den Pfeilen sortieren.
+6. **Vorschau** zeigt den Bericht mit großen Bildern und Tourverweisen.
+7. Mit **Speichern** den Bericht dauerhaft ablegen; die gespeicherte Version
+   ist anschließend auch ohne Anmeldung sichtbar.
+
+Fotos werden nur über ihre Immich-ID referenziert, nicht kopiert oder in
+andere Alben verschoben. Textabsätze bleiben erhalten; HTML und Markdown
+werden nicht als Formatierung ausgeführt. Entfernte Immich-Fotos stehen
+auch dem Bericht nicht mehr zur Verfügung.
+
+Bei veralteten Bearbeitungen aus einem zweiten Tab wird das Speichern mit
+einem Konflikt abgewiesen, ohne den lokalen Text zu verwerfen. Vor dem
+Neuladen einer gespeicherten Version gegebenenfalls den eigenen Text sichern.
+Nur das Bearbeiten und Speichern erfordert die gemeinsame Mapper-Anmeldung.
+Widerrufbare öffentliche Freigabelinks sind der nächste, noch nicht
+implementierte Schritt.
 
 Die Tourart (Wanderung oder Fahrradtour) lässt sich beim Bearbeiten eines Albums
 festlegen. Sie wird gemeinsam mit den übrigen Tourdaten gespeichert.

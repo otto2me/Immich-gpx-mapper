@@ -154,15 +154,36 @@ export async function registerImmichRoutes(
     }
   );
 
-  app.get<{ Params: { assetId: string } }>(
+  app.get<{ Params: { assetId: string }; Querystring: { size?: string } }>(
     "/api/assets/:assetId/thumbnail",
     async (request, reply) => {
+      const size = request.query.size ?? "thumbnail";
+      if (size !== "thumbnail" && size !== "preview") return reply.code(400).send({ message: "Ungültige Bildgröße" });
       const response = await immichFetch(
-        `assets/${encodeURIComponent(request.params.assetId)}/thumbnail?size=thumbnail`
+        `assets/${encodeURIComponent(request.params.assetId)}/thumbnail?size=${size}`
       );
       const contentType = response.headers.get("content-type");
       if (contentType) reply.type(contentType);
       return reply.send(Buffer.from(await response.arrayBuffer()));
     }
   );
+
+  return {
+    async albumContainsAssets(albumId: string, assetIds: string[]) {
+      const remaining = new Set(assetIds);
+      if (!remaining.size) return true;
+      let page = 1;
+      while (true) {
+        const result = await searchAssets(albumId, page, 1000);
+        for (const asset of result.assets?.items ?? []) remaining.delete(asset.id);
+        if (!remaining.size) return true;
+        if (!result.assets?.nextPage) return false;
+        const next = Number(result.assets.nextPage);
+        if (!Number.isInteger(next) || next <= page) {
+          throw Object.assign(new Error("Immich liefert eine ungültige Folgeseite"), { statusCode: 502 });
+        }
+        page = next;
+      }
+    }
+  };
 }

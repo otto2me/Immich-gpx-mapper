@@ -56,6 +56,24 @@ export type Comment = {
   created_at: string;
 };
 
+export type ReportPhoto = { assetId: string; caption: string };
+export type ReportChapter = {
+  id: string;
+  title: string;
+  date: string | null;
+  text: string;
+  tourId: string | null;
+  photos: ReportPhoto[];
+};
+export type TravelReport = {
+  id?: string;
+  title: string;
+  introduction: string;
+  chapters: ReportChapter[];
+  revision: number;
+  updatedAt?: string;
+};
+
 export type KomootPreview = {
   title: string;
   description: string;
@@ -133,6 +151,10 @@ export const api = {
   albumAssets: (id: string, page: number, tourId?: string | null) =>
     request<AlbumAssetPage>(`/api/albums/${encodeURIComponent(id)}/assets?${new URLSearchParams({ page: String(page), ...(tourId ? { tourId } : {}) })}`),
   tours: (id: string) => request<Tour[]>(`/api/albums/${encodeURIComponent(id)}/tours`),
+  report: (id: string) => request<TravelReport | null>(`/api/albums/${encodeURIComponent(id)}/report`),
+  saveReport: (id: string, report: TravelReport) => request<TravelReport>(`/api/albums/${encodeURIComponent(id)}/report`, {
+    method: "PUT", body: JSON.stringify(report)
+  }),
   createTour: (id: string, title: string, date: string, timeZone: string) =>
     request<Tour>(`/api/albums/${encodeURIComponent(id)}/tours`, {
       method: "POST", body: JSON.stringify({ title, date, timeZone })

@@ -87,8 +87,11 @@ test("tour APIs isolate albums, files and comments and filter before photo pagin
   };
   try {
     await registerAuth(app, config);
-    await registerImmichRoutes(app, config, database);
+    const immich = await registerImmichRoutes(app, config, database);
+    assert.equal(await immich.albumContainsAssets("album", ["asset-0", "asset-1100"]), true);
+    assert.equal(await immich.albumContainsAssets("album", ["missing"]), false);
     await registerTourRoutes(app, database, config);
+    assert.equal((await app.inject({ url: "/api/assets/asset-0/thumbnail?size=invalid" })).statusCode, 400);
     assert.equal((await app.inject({ method: "POST", url: "/api/albums/album/tours", payload: { date: "2026-08-12" } })).statusCode, 401);
     const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { password: config.appPassword } });
     const headers = { cookie: login.headers["set-cookie"].split(";")[0] };

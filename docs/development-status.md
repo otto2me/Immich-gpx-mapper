@@ -12,8 +12,48 @@ App-Passwort geschützt.
 
 Mehrere Touren je Album mit Datumsnavigation, optionalen Zeitfenstern und
 gemeinsamer Foto-/Kartenfilterung sind umgesetzt und lokal geprüft.
-Reisebericht und widerrufbare Freigabelinks ohne Anmeldung bleiben die
-nachfolgenden, noch nicht implementierten Erweiterungen.
+Der Reisebericht mit Kapitel-Editor und Lesevorschau ist ebenfalls umgesetzt
+und lokal geprüft. Widerrufbare Freigabelinks ohne Anmeldung bleiben der
+nächste, noch nicht implementierte Schritt.
+
+## Reisebericht: Umsetzung und Prüfung
+
+- Ein Bericht pro Album mit Titel, Einleitung und sortierten Kapiteln aus
+  Datum, Text, Tourverweis und ausgewählten Fotos mit Bildunterschriften.
+- Editor mit paginierter Fotoauswahl aus dem Album oder einer Tour,
+  Kapitel-/Fotosortierung und Entfernen einzelner Einträge. Separate
+  Lesevorschau mit großen Immich-Vorschaubildern und Links zur Touransicht.
+- Persistenz in der neuen SQLite-Tabelle `reports`; bestehende Tourdaten
+  werden nicht verändert. Bilder bleiben Referenzen auf Immich-Assets.
+- Bericht ist ohne Anmeldung lesbar; Schreiben erfordert die gemeinsame
+  Mapper-Sitzung. Noch keine Freigabetokens. „Reisebericht“ steht vor
+  „Touren“ und ist die Standardansicht; explizite Tour-Links bleiben erhalten.
+- Bearbeitungswerkzeuge erscheinen nur nach Anmeldung. Beim An-/Abmelden
+  wird die Berichtsansicht neu geladen, damit ausgeloggte Besucher nur die
+  gespeicherte Version sehen, nicht einen verworfenen lokalen Entwurf.
+- Serverseitige Prüfung von Kapitelstruktur, Grenzen sowie Albumzugehörigkeit
+  der Touren und Fotos. Revisionsprüfung verhindert stilles Überschreiben
+  durch einen zweiten Editor-Tab; bei Konflikt HTTP 409, lokaler Text bleibt.
+- Nachfragen vor dem Verwerfen eigener Änderungen und Schutz über
+  `beforeunload`; Navigation ist während des Speicherns gesperrt.
+- Vier automatisierte Tests aus Tour- und Berichts-Suite bestehen. Zusätzlich
+  geprüft: Kapitelreihenfolge und Bildunterschriften, Neustart-Persistenz,
+  fremde Tour-/Foto-IDs, ungültige Daten und Grenzen, gleichzeitige Writes,
+  Lesen ohne Anmeldung und nach Logout sowie abgewiesene Schreibzugriffe
+  ohne gültige Sitzung.
+- Browserprüfung mit realem Immich-Album und separater Testdatenbank:
+  Bericht mit zwei Kapiteln und zwei Fotos gespeichert und neu geladen,
+  große Bildvorschau (2558 Pixel Quellbreite), Tourwechsel und Abbrechen des
+  Verwerfens erfolgreich. Eingegebene Script-Tags wurden als Text angezeigt,
+  nicht ausgeführt. Die Test-Tags wurden anschließend wieder entfernt.
+- Desktopvorschau bei 1280 Pixeln und Mobil-Editor bei 390 Pixeln geprüft;
+  kein horizontaler Überlauf, Beschriftungen und Werkzeuge passen.
+- Icon-Werkzeuge nutzen das gepflegte Paket `@lucide/svelte`. npm meldet
+  weiterhin sechs niedrige Dependency-Advisories; kein erzwungenes Audit-Fix
+  oder sachfremdes Dependency-Upgrade vorgenommen.
+- Noch offen: Freigabelinks und deren Verhältnis zum ausdrücklich gewünschten
+  offenen Lesemodus. Ein Linkwiderruf allein sperrt die normale Albumansicht
+  nicht; ein ausschließlich linkgebundener Modus erfordert weitere Regeln.
 
 ## Mehrtag-Alben: Umsetzung und Prüfung
 
@@ -43,14 +83,14 @@ nachfolgenden, noch nicht implementierten Erweiterungen.
 - Tourauswahl bleibt nach Neuladen erhalten. Pfeiltasten wechseln die Tabs,
   ohne den Fokus zu verlieren. Desktop bei 1280 Pixeln und Mobilansicht bei
   390 Pixeln visuell geprüft; kein horizontaler Überlauf.
-- Nicht enthalten: Reisebericht, öffentliche Berichtsfreigabe,
+- Nicht in diesem Mehrtag-Schritt enthalten: öffentliche Berichtsfreigabe,
   automatische GPX-Zeitübernahme und manuelle Fotoausnahmen.
 
 Tests nach einem Build ausführen:
 
 ```sh
 npm run build
-node --test backend/test/tours.test.mjs
+node --test backend/test/tours.test.mjs backend/test/reports.test.mjs
 ```
 
 ## Aktualisierung vom 02.11.2026
@@ -184,6 +224,10 @@ node --test backend/test/tours.test.mjs
 - `backend/src/immich.ts`
 - `backend/src/server.ts`
 - `backend/test/tours.test.mjs`
+- `backend/src/reports.ts`
+- `backend/src/auth.ts`
+- `backend/test/reports.test.mjs`
+- `frontend/src/lib/ReportEditor.svelte`
 - `backend/package.json`
 - `package-lock.json`
 - `docs/architecture.md`
@@ -220,8 +264,8 @@ node --test backend/test/tours.test.mjs
 
 Die commit-basierte Footer-Version, lokale Komoot-Screenshots und die
 Logout-Korrektur sowie mehrere Touren pro Album mit zeitbasierter
-Fotozuordnung sind implementiert und geprüft. Reiseberichte und deren
-Freigabelinks sind noch nicht implementiert.
+Fotozuordnung und Reiseberichts-Entwürfe sind implementiert und geprüft.
+Öffentliche Freigabelinks sind noch nicht implementiert.
 
 ## Noch offene Integrationsprüfungen
 

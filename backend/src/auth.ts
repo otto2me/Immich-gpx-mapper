@@ -18,7 +18,7 @@ function getCookie(request: FastifyRequest, name: string) {
   return value?.slice(prefix.length);
 }
 
-function isAuthenticated(request: FastifyRequest) {
+export function isAuthenticated(request: FastifyRequest) {
   const token = getCookie(request, cookieName);
   if (!token) return false;
   const expiresAt = sessions.get(token);

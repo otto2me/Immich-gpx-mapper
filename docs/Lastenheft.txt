@@ -16,7 +16,9 @@
 ○ Standardmäßig ganzer lokaler Tag; Beginn inklusive, Ende exklusiv; Zeitfenster innerhalb desselben Tages
 ○ Tourgalerie und Kartenmarker gemeinsam nach Aufnahmezeitpunkt filtern, vor der Fotopaginierung
 ○ GPX-Dateien, Komoot-Bilder und Kommentare je Tour getrennt verwalten; bestehende Daten bei Migration erhalten
-○ Reisebericht mit Texten, ausgewählten Fotos und Tourverweisen (geplant)
+○ Reisebericht pro Album mit Titel, Einleitung und sortierbaren Kapiteln aus Texten, ausgewählten Fotos, Bildunterschriften und Tourverweisen
+○ Reisebericht vor Touren und als Standardansicht; gespeicherte Berichte ohne Anmeldung lesbar, Bearbeiten/Speichern nur mit Mapper-Anmeldung
+○ Berichtseditor und Lesevorschau; Versionsprüfung gegen unbeabsichtigtes Überschreiben
 ○ Bericht ohne Anmeldung über widerrufbaren Freigabelink teilen; Zugriff nur auf ausgewählte Inhalte (geplant)
 ○ Beschreibung
 ○ Kommentare

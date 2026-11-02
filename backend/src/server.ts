@@ -8,6 +8,7 @@ import { registerAuth } from "./auth.js";
 import { registerImmichRoutes } from "./immich.js";
 import { registerTourRoutes } from "./tours.js";
 import { registerKomootRoutes } from "./komoot.js";
+import { registerReportRoutes } from "./reports.js";
 
 const config = loadConfig();
 const database = await openDatabase(config);
@@ -18,9 +19,10 @@ const app = Fastify({
 });
 
 await registerAuth(app, config);
-await registerImmichRoutes(app, config, database);
+const immich = await registerImmichRoutes(app, config, database);
 await registerTourRoutes(app, database, config);
 await registerKomootRoutes(app);
+await registerReportRoutes(app, database, immich.albumContainsAssets);
 
 app.get("/api/config", async () => ({
   immichWebUrl: config.immichWebUrl
