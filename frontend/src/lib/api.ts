@@ -33,6 +33,11 @@ export type AlbumAssetPage = {
 
 export type Tour = {
   id?: string;
+  title: string;
+  date: string | null;
+  timeZone: string;
+  startTime: string | null;
+  endTime: string | null;
   activityType: "hike" | "bike";
   komootLink: string;
   description: string;
@@ -104,6 +109,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export function tourResource(albumId: string, suffix = "", tourId?: string | null) {
+  const path = `/api/tours/${encodeURIComponent(albumId)}${suffix}`;
+  return tourId ? `${path}?${new URLSearchParams({ tourId })}` : path;
+}
+
 export const api = {
   publicConfig: () => request<{ immichWebUrl: string | null }>("/api/config"),
   session: () => request<{ authenticated: boolean }>("/api/auth/session"),
@@ -118,14 +128,19 @@ export const api = {
   komootLinkedAlbums: () => request<string[]>("/api/tours/komoot-linked-albums"),
   album: (id: string) =>
     request<Album>(`/api/albums/${encodeURIComponent(id)}`),
-  albumMapMarkers: (id: string) =>
-    request<MapMarker[]>(`/api/albums/${encodeURIComponent(id)}/map-markers`),
-  albumAssets: (id: string, page: number) =>
-    request<AlbumAssetPage>(`/api/albums/${encodeURIComponent(id)}/assets?page=${page}`),
-  tour: (id: string) =>
-    request<Tour | null>(`/api/tours/${encodeURIComponent(id)}`),
-  saveTour: (id: string, tour: Tour) =>
-    request<Tour>(`/api/tours/${encodeURIComponent(id)}`, {
+  albumMapMarkers: (id: string, tourId?: string | null) =>
+    request<MapMarker[]>(`/api/albums/${encodeURIComponent(id)}/map-markers${tourId ? `?${new URLSearchParams({ tourId })}` : ""}`),
+  albumAssets: (id: string, page: number, tourId?: string | null) =>
+    request<AlbumAssetPage>(`/api/albums/${encodeURIComponent(id)}/assets?${new URLSearchParams({ page: String(page), ...(tourId ? { tourId } : {}) })}`),
+  tours: (id: string) => request<Tour[]>(`/api/albums/${encodeURIComponent(id)}/tours`),
+  createTour: (id: string, title: string, date: string, timeZone: string) =>
+    request<Tour>(`/api/albums/${encodeURIComponent(id)}/tours`, {
+      method: "POST", body: JSON.stringify({ title, date, timeZone })
+    }),
+  tour: (id: string, tourId?: string | null) =>
+    request<Tour | null>(tourResource(id, "", tourId)),
+  saveTour: (id: string, tour: Tour, tourId?: string | null) =>
+    request<Tour>(tourResource(id, "", tourId), {
       method: "PUT",
       body: JSON.stringify(tour)
     }),
@@ -134,24 +149,24 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ url })
     }),
-  captureKomootScreenshots: (albumId: string, url: string) =>
-    request<Tour>(`/api/tours/${encodeURIComponent(albumId)}/komoot-screenshots`, {
+  captureKomootScreenshots: (albumId: string, url: string, tourId?: string | null) =>
+    request<Tour>(tourResource(albumId, "/komoot-screenshots", tourId), {
       method: "POST",
       body: JSON.stringify({ url })
     }),
-  comments: (id: string) =>
-    request<Comment[]>(`/api/tours/${encodeURIComponent(id)}/comments`),
-  addComment: (id: string, author: string, text: string) =>
-    request<Comment>(`/api/tours/${encodeURIComponent(id)}/comments`, {
+  comments: (id: string, tourId?: string | null) =>
+    request<Comment[]>(tourResource(id, "/comments", tourId)),
+  addComment: (id: string, author: string, text: string, tourId?: string | null) =>
+    request<Comment>(tourResource(id, "/comments", tourId), {
       method: "POST",
       body: JSON.stringify({ author, text })
     }),
-  upload: (id: string, kind: "gpx" | "komoot-map" | "elevation", file: File) => {
+  upload: (id: string, kind: "gpx" | "komoot-map" | "elevation", file: File, tourId?: string | null) => {
     const body = new FormData();
     body.append("file", file);
     const path = kind === "gpx"
-      ? `/api/tours/${encodeURIComponent(id)}/gpx`
-      : `/api/tours/${encodeURIComponent(id)}/images/${kind}`;
+      ? tourResource(id, "/gpx", tourId)
+      : tourResource(id, `/images/${kind}`, tourId);
     return request<{ uploaded?: boolean; fileName?: string }>(path, {
       method: "POST",
       body
@@ -161,6 +176,11 @@ export const api = {
 
 export function emptyTour(): Tour {
   return {
+    title: "",
+    date: null,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    startTime: null,
+    endTime: null,
     activityType: "hike",
     komootLink: "",
     description: "",

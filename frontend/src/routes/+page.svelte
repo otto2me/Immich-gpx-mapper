@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { pushState } from "$app/navigation";
   import "leaflet/dist/leaflet.css";
   import GpxMap from "../lib/GpxMap.svelte";
   import {
     api,
     emptyTour,
     komootEmbedUrl,
+    tourResource,
     type Album,
     type Asset,
     type Comment,
@@ -20,6 +22,15 @@
   let komootLinkedAlbumIds = $state<string[]>([]);
   let albumsPage = $state(1);
   let selectedAlbum = $state<Album | null>(null);
+  let tours = $state<Tour[]>([]);
+  let selectedTourId = $state<string | null>(null);
+  let selectingTour = $state(false);
+  let addingTour = $state(false);
+  let newTourDate = $state("");
+  let newTourTitle = $state("");
+  let newTourTimeZone = $state(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  let selectionRevision = 0;
+  let albumRevision = 0;
   let tour = $state<Tour>(emptyTour());
   let comments = $state<Comment[]>([]);
   let immichWebUrl = $state<string | null>(null);
@@ -93,6 +104,8 @@
   }
 
   async function loadAlbum(id: string) {
+    const revision = ++albumRevision;
+    ++selectionRevision;
     error = "";
     notice = "";
     komootPreview = null;
@@ -109,19 +122,20 @@
     photoMapError = "";
     loading = true;
     try {
-      const [album, savedTour, savedComments] = await Promise.all([
+      const [album, savedTours] = await Promise.all([
         api.album(id),
-        api.tour(id),
-        api.comments(id)
+        api.tours(id)
       ]);
+      if (revision !== albumRevision) return;
       selectedAlbum = album;
-      tour = { ...emptyTour(), ...savedTour };
-      comments = savedComments;
-      try {
-        photoMarkers = await api.albumMapMarkers(id);
-      } catch {
-        photoMapError = "Foto-Standorte konnten von Immich nicht geladen werden.";
-      }
+      tours = savedTours;
+      addingTour = false;
+      const params = new URLSearchParams(location.search);
+      const requestedTour = params.get("tour");
+      const initialTour = params.get("view") === "overview" ? null :
+        savedTours.find((item) => item.id === requestedTour) ??
+        (savedTours.length === 1 && !savedTours[0].date ? savedTours[0] : null);
+      await selectTour(initialTour?.id ?? null, false);
     } catch (reason) {
       error = message(reason);
       selectedAlbum = null;
@@ -130,8 +144,95 @@
     }
   }
 
+  async function selectTour(id: string | null, updateLocation = true) {
+    const albumId = selectedAlbum?.id;
+    if (!albumId) return;
+    const revision = ++selectionRevision;
+    selectedTourId = id;
+    tour = { ...emptyTour(), ...tours.find((item) => item.id === id) };
+    comments = [];
+    commentText = "";
+    photoMarkers = [];
+    photoMapError = "";
+    mapFocusAssetId = null;
+    albumAssets = [];
+    albumAssetsPage = 0;
+    albumAssetsTotal = 0;
+    albumAssetsHasMore = false;
+    albumAssetsLoading = false;
+    albumAssetsError = "";
+    komootPreview = null;
+    komootDisplayMode = "embed";
+    selectingTour = true;
+    error = "";
+    if (updateLocation) {
+      const params = new URLSearchParams({ album: albumId });
+      if (id) params.set("tour", id);
+      else params.set("view", "overview");
+      pushState(`/?${params}`, {});
+    }
+    try {
+      const [saved, savedComments, markers] = await Promise.all([
+        id ? api.tour(albumId, id) : Promise.resolve(null),
+        id ? api.comments(albumId, id) : Promise.resolve([]),
+        id ? api.albumMapMarkers(albumId, id).catch(() => {
+          if (revision === selectionRevision) photoMapError = "Foto-Standorte konnten von Immich nicht geladen werden.";
+          return [];
+        }) : Promise.resolve([])
+      ]);
+      if (revision !== selectionRevision) return;
+      tour = { ...emptyTour(), ...saved };
+      comments = savedComments;
+      photoMarkers = markers;
+      imageVersion += 1;
+      await loadAlbumAssets(1);
+    } catch (reason) {
+      if (revision === selectionRevision) error = message(reason);
+    } finally {
+      if (revision === selectionRevision) selectingTour = false;
+    }
+  }
+
+  function tourDateLabel(value: string | null) {
+    return value ? new Date(`${value}T12:00:00Z`).toLocaleDateString("de-DE", { timeZone: "UTC" }) : "Ohne Datum";
+  }
+
+  function onTourTabKeydown(event: KeyboardEvent) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const tabs = Array.from((event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role="tab"]:not(:disabled)'));
+    const index = tabs.indexOf(event.target as HTMLButtonElement);
+    if (index < 0 || !tabs.length) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 :
+      (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    tabs[next].focus();
+    tabs[next].click();
+  }
+
+  async function createTour(event: SubmitEvent) {
+    event.preventDefault();
+    if (!selectedAlbum || !newTourDate) return;
+    busy = true;
+    error = "";
+    try {
+      const created = await api.createTour(selectedAlbum.id, newTourTitle, newTourDate, newTourTimeZone);
+      tours = await api.tours(selectedAlbum.id);
+      addingTour = false;
+      newTourTitle = "";
+      newTourDate = "";
+      await selectTour(created.id ?? null);
+      notice = "Tour angelegt.";
+    } catch (reason) {
+      error = message(reason);
+    } finally {
+      busy = false;
+    }
+  }
+
   async function loadAlbumAssets(page: number) {
     const albumId = selectedAlbum?.id;
+    const revision = selectionRevision;
+    const tourId = selectedTourId;
     if (
       !albumId || albumAssetsLoading || page < 1 ||
       (albumAssetsTotal > 0 && page > albumAssetsTotalPages)
@@ -140,17 +241,17 @@
     albumAssetsLoading = true;
     albumAssetsError = "";
     try {
-      const result = await api.albumAssets(albumId, page);
-      if (selectedAlbum?.id !== albumId) return;
+      const result = await api.albumAssets(albumId, page, tourId);
+      if (selectedAlbum?.id !== albumId || revision !== selectionRevision) return;
       albumAssets = result.items;
       albumAssetsPage = result.page;
       albumAssetsPageSize = result.pageSize;
-      albumAssetsTotal = selectedAlbum.assetCount ?? result.total;
+      albumAssetsTotal = tour.date ? result.total : selectedAlbum.assetCount ?? result.total;
       albumAssetsHasMore = result.hasMore;
     } catch (reason) {
-      albumAssetsError = message(reason);
+      if (revision === selectionRevision) albumAssetsError = message(reason);
     } finally {
-      if (selectedAlbum?.id === albumId) albumAssetsLoading = false;
+      if (selectedAlbum?.id === albumId && revision === selectionRevision) albumAssetsLoading = false;
     }
   }
 
@@ -210,12 +311,14 @@
   });
 
   async function openAlbum(album: Album) {
-    history.pushState(null, "", `/?album=${encodeURIComponent(album.id)}`);
+    pushState(`/?album=${encodeURIComponent(album.id)}`, {});
     await loadAlbum(album.id);
   }
 
   function backToAlbums() {
-    history.pushState(null, "", "/");
+    ++albumRevision;
+    ++selectionRevision;
+    pushState("/", {});
     selectedAlbum = null;
     void loadAlbums();
   }
@@ -252,8 +355,10 @@
     busy = true;
     error = "";
     try {
-      const saved = await api.saveTour(selectedAlbum.id, tour);
+      const saved = await api.saveTour(selectedAlbum.id, tour, selectedTourId);
       tour = { ...emptyTour(), ...saved };
+      tours = await api.tours(selectedAlbum.id);
+      await selectTour(saved.id ?? null, false);
       notice = "Tourdaten gespeichert.";
     } catch (reason) {
       error = message(reason);
@@ -284,12 +389,14 @@
     error = "";
     notice = "";
     try {
-      const saved = await api.saveTour(selectedAlbum.id, tour);
+      const saved = await api.saveTour(selectedAlbum.id, tour, selectedTourId);
       const captured = await api.captureKomootScreenshots(
         selectedAlbum.id,
-        saved.komootLink
+        saved.komootLink,
+        selectedTourId
       );
       tour = { ...emptyTour(), ...captured };
+      tours = await api.tours(selectedAlbum.id);
       imageVersion += 1;
       komootDisplayMode = "local";
       komootPreview = null;
@@ -327,9 +434,10 @@
     busy = true;
     error = "";
     try {
-      await api.upload(selectedAlbum.id, kind, file);
-      const refreshed = await api.tour(selectedAlbum.id);
+      await api.upload(selectedAlbum.id, kind, file, selectedTourId);
+      const refreshed = await api.tour(selectedAlbum.id, selectedTourId);
       tour = { ...emptyTour(), ...refreshed };
+      tours = await api.tours(selectedAlbum.id);
       imageVersion += 1;
       notice = kind === "gpx" ? "GPX-Track hochgeladen." : "Bild hochgeladen.";
     } catch (reason) {
@@ -345,7 +453,7 @@
     busy = true;
     error = "";
     try {
-      const comment = await api.addComment(selectedAlbum.id, author, commentText);
+      const comment = await api.addComment(selectedAlbum.id, author, commentText, selectedTourId);
       comments = [...comments, comment];
       commentText = "";
     } catch (reason) {
@@ -431,10 +539,43 @@
       {/if}
     </section>
 
+    <nav class="tour-navigation" aria-label="Touren im Album">
+      <div class="tour-tabs" role="tablist" tabindex="-1" aria-label="Tagesauswahl" onkeydown={onTourTabKeydown}>
+        <button type="button" role="tab" aria-selected={!selectedTourId} aria-controls="tour-content" tabindex={!selectedTourId ? 0 : -1} disabled={busy} onclick={() => selectTour(null)}>Übersicht</button>
+        {#each tours as item (item.id)}
+          <button type="button" role="tab" aria-selected={selectedTourId === item.id} aria-controls="tour-content" tabindex={selectedTourId === item.id ? 0 : -1} title={item.title || tourDateLabel(item.date)} disabled={busy} onclick={() => selectTour(item.id ?? null)}>{tourDateLabel(item.date)}</button>
+        {/each}
+      </div>
+      {#if authenticated}
+        <button class="secondary-button" type="button" disabled={busy || selectingTour} onclick={() => (addingTour = !addingTour)}>Tour anlegen</button>
+      {/if}
+    </nav>
+
+    <datalist id="tour-time-zones">
+      <option value="Europe/Berlin"></option>
+      <option value="Europe/Vienna"></option>
+      <option value="Europe/Zurich"></option>
+      <option value="Pacific/Auckland"></option>
+      <option value="America/New_York"></option>
+      <option value="UTC"></option>
+    </datalist>
+
+    {#if authenticated && addingTour}
+      <form class="tour-create" onsubmit={createTour}>
+        <label>Titel<input maxlength="160" bind:value={newTourTitle} /></label>
+        <label>Tourdatum<input type="date" required bind:value={newTourDate} /></label>
+        <label>Zeitzone<input list="tour-time-zones" required bind:value={newTourTimeZone} /></label>
+        <button class="primary-button" type="submit" disabled={busy || !newTourDate}>Anlegen</button>
+        <button class="quiet-button" type="button" disabled={busy} onclick={() => (addingTour = false)}>Abbrechen</button>
+      </form>
+    {/if}
+
+    <div id="tour-content" role="tabpanel" aria-label={selectedTourId ? tour.title || tourDateLabel(tour.date) : "Albumübersicht"}>
+    {#if selectingTour}<p role="status">Tour und Fotos werden geladen ...</p>{/if}
     <details class="album-gallery" ontoggle={onAlbumGalleryToggle}>
       <summary>
-        <span>Albumfotos</span>
-        <span class="count">{albumAssetsTotal || selectedAlbum.assetCount || 0}</span>
+        <span>{selectedTourId ? "Tourfotos" : "Albumfotos"}</span>
+        <span class="count">{albumAssetsPage > 0 ? albumAssetsTotal : selectedTourId ? "…" : selectedAlbum.assetCount || 0}</span>
       </summary>
       {#if !immichWebUrl}
         <p class="muted">Zum Öffnen in Immich bitte `IMMICH_WEB_URL` auf die im Browser erreichbare Immich-Adresse setzen.</p>
@@ -490,16 +631,17 @@
           </nav>
         {/if}
       {:else if !albumAssetsLoading}
-        <p class="muted">Keine Fotos in diesem Album.</p>
+        <p class="muted">{tour.date ? "Keine Fotos im gewählten Zeitraum." : "Keine Fotos in diesem Album."}</p>
       {/if}
     </details>
 
-    <div class="detail-grid">
+    {#if selectedTourId}
+    <div class="detail-grid" inert={selectingTour}>
       <section class="panel tour-panel">
         <div class="section-title">
           <div>
             <p class="eyebrow">Tourinformationen</p>
-            <h2>Deine Tour</h2>
+            <h2>{tour.title || "Deine Tour"}</h2>
           </div>
           {#if tour.direction}
             <span class="direction-tag">
@@ -510,6 +652,13 @@
 
         {#if authenticated}
           <form class="tour-form" onsubmit={saveTour}>
+            <label>Titel<input maxlength="160" bind:value={tour.title} /></label>
+            <div class="schedule-grid">
+              <label>Tourdatum<input type="date" bind:value={tour.date} /></label>
+              <label>Zeitzone<input required list="tour-time-zones" bind:value={tour.timeZone} /></label>
+              <label>Beginn<input type="time" bind:value={tour.startTime} disabled={!tour.date} /></label>
+              <label>Ende<input type="time" bind:value={tour.endTime} disabled={!tour.date} /></label>
+            </div>
             <label>
               Komoot-Link
               <input
@@ -630,6 +779,7 @@
           </form>
         {:else}
           <div class="read-only">
+            <p>{tourDateLabel(tour.date)}{tour.date ? ` · ${tour.startTime || "00:00"}–${tour.endTime || "24:00"} · ${tour.timeZone}` : ""}</p>
             <span class="direction-tag">
               {tour.activityType === "bike" ? "Fahrradtour" : "Wanderung"}
             </span>
@@ -703,7 +853,7 @@
         </div>
         {#if tour.hasGpx}
           <GpxMap
-            src={`/api/tours/${encodeURIComponent(selectedAlbum.id)}/gpx`}
+            src={tourResource(selectedAlbum.id, "/gpx", selectedTourId) + `&v=${imageVersion}`}
             albumId={selectedAlbum.id}
             markers={photoMarkers}
             {immichWebUrl}
@@ -769,13 +919,13 @@
               <div class="preview-images">
                 {#if tour.hasKomootMap}
                   <figure>
-                    <img src={`/api/tours/${encodeURIComponent(selectedAlbum.id)}/images/komoot-map?v=${imageVersion}`} alt="Komoot-Kartenvorschau" />
+                    <img src={tourResource(selectedAlbum.id, "/images/komoot-map", selectedTourId) + `&v=${imageVersion}`} alt="Komoot-Kartenvorschau" />
                     <figcaption>Komoot-Karte</figcaption>
                   </figure>
                 {/if}
                 {#if tour.hasElevationProfile}
                   <figure>
-                    <img src={`/api/tours/${encodeURIComponent(selectedAlbum.id)}/images/elevation?v=${imageVersion}`} alt="Höhenprofil" />
+                    <img src={tourResource(selectedAlbum.id, "/images/elevation", selectedTourId) + `&v=${imageVersion}`} alt="Höhenprofil" />
                     <figcaption>Höhenprofil</figcaption>
                   </figure>
                 {/if}
@@ -829,6 +979,21 @@
           <p class="muted">Zum Kommentieren bitte anmelden.</p>
         {/if}
       </section>
+    </div>
+    {:else}
+      <section class="tour-overview">
+        <h2>Touren <span class="count">{tours.length}</span></h2>
+        {#if tours.length}
+          <ul>
+            {#each tours as item (item.id)}
+              <li><button type="button" disabled={busy || selectingTour} onclick={() => selectTour(item.id ?? null)}><span>{tourDateLabel(item.date)}</span><strong>{item.title || (item.activityType === "bike" ? "Fahrradtour" : "Wanderung")}</strong><span>{item.distanceKm !== null ? `${item.distanceKm} km` : ""}</span></button></li>
+            {/each}
+          </ul>
+        {:else}
+          <p class="muted">Noch keine Touren vorhanden.</p>
+        {/if}
+      </section>
+    {/if}
     </div>
   {:else}
     <section class="hero">
@@ -932,6 +1097,22 @@
 </footer>
 
 <style>
+  .tour-navigation { display: flex; align-items: center; gap: 12px; min-width: 0; margin: 20px 0; }
+  .tour-tabs { display: flex; gap: 4px; overflow-x: auto; min-width: 0; flex: 1; border-bottom: 1px solid #d5ddd7; }
+  .tour-tabs button { flex: 0 0 auto; min-height: 44px; padding: 8px 14px; border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; color: inherit; white-space: nowrap; }
+  .tour-tabs button[aria-selected="true"] { border-bottom-color: #378a5d; font-weight: 700; }
+  .tour-create { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 16px 0; border-bottom: 1px solid #d5ddd7; margin-bottom: 20px; }
+  .tour-create label { flex: 1 1 170px; min-width: 0; display: grid; gap: 6px; }
+  .tour-create input { width: 100%; min-width: 0; }
+  .schedule-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .schedule-grid label { min-width: 0; }
+  .schedule-grid input { width: 100%; min-width: 0; }
+  .tour-overview { padding: 20px 0; }
+  .tour-overview ul { list-style: none; padding: 0; }
+  .tour-overview li { border-bottom: 1px solid #d5ddd7; }
+  .tour-overview li button { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; width: 100%; min-height: 56px; padding: 12px 0; text-align: left; border: 0; border-radius: 0; background: transparent; color: inherit; }
+  .tour-overview li strong { flex: 1 1 150px; overflow-wrap: anywhere; }
+  @media (max-width: 540px) { .tour-navigation { flex-wrap: wrap; } .tour-tabs { flex-basis: 100%; } .schedule-grid { grid-template-columns: minmax(0, 1fr); } }
   :global(*) { box-sizing: border-box; }
   :global(body) {
     margin: 0;

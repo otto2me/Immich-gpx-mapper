@@ -18,7 +18,7 @@ const app = Fastify({
 });
 
 await registerAuth(app, config);
-await registerImmichRoutes(app, config);
+await registerImmichRoutes(app, config, database);
 await registerTourRoutes(app, database, config);
 await registerKomootRoutes(app);
 

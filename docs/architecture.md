@@ -68,12 +68,18 @@ Vorgesehene Konfigurationswerte:
 
 ## Datenmodell
 
-Tour-Zusatzdaten werden über die Immich-Album-ID zugeordnet:
+Tour-Zusatzdaten haben eine eigene ID und werden über die Immich-Album-ID
+zugeordnet. Je Album ist höchstens eine Tour pro Datum erlaubt:
 
 ```sql
 CREATE TABLE tours (
   id TEXT PRIMARY KEY,
-  immich_album_id TEXT NOT NULL UNIQUE,
+  immich_album_id TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  tour_date TEXT,
+  time_zone TEXT NOT NULL DEFAULT 'UTC',
+  start_time TEXT,
+  end_time TEXT,
   activity_type TEXT NOT NULL DEFAULT 'hike'
     CHECK(activity_type IN ('hike', 'bike')),
   komoot_link TEXT,
@@ -88,6 +94,9 @@ CREATE TABLE tours (
   updated_at TEXT NOT NULL
 );
 
+CREATE UNIQUE INDEX tours_album_date ON tours(immich_album_id, tour_date);
+CREATE UNIQUE INDEX tours_album_undated ON tours(immich_album_id) WHERE tour_date IS NULL;
+
 CREATE TABLE comments (
   id TEXT PRIMARY KEY,
   tour_id TEXT NOT NULL REFERENCES tours(id) ON DELETE CASCADE,
@@ -100,18 +109,21 @@ CREATE TABLE comments (
 Immich-Album- und Asset-Metadaten werden live über die Immich-API gelesen und
 nicht in der Mapper-Datenbank dupliziert.
 
-### Diskussionsstand: Mehrtag-Alben und Reiseberichte
+### Mehrtag-Alben und geplante Reiseberichte
 
-Noch nicht umgesetzt. Fachlich bestätigt sind mehrere Touren je Album, aber
+Umgesetzt sind mehrere Touren je Album, aber
 höchstens eine Tour je Kalendertag innerhalb dieses Albums. Mehrere Touren am
 selben Tag werden nicht benötigt. Urlaubstage ohne Tour bleiben im Album
 darstellbar. Jede Tour behält eine eigene Identität; Datum und Tabs dienen
 der Zuordnung und Navigation.
 
-Die aktuelle eindeutige Album-Zuordnung in `tours` müsste dafür migriert
-werden. Bestehende Touren, Kommentare und Dateiverweise müssen erhalten
-bleiben. Eine Tour könnte Titel, Datum, Beginn und Ende, GPX-Datei sowie
-Komoot-Link enthalten.
+Die bisher eindeutige Album-Zuordnung in `tours` wird beim Start innerhalb
+einer SQLite-Transaktion migriert. Bestehende IDs, Kommentare und
+Dateiverweise bleiben erhalten. Vorhandene Touren erhalten zunächst kein
+Datum und erscheinen als „Ohne Datum“. Das Datum kann später bewusst
+zugeordnet werden. Vor dem produktiven Update das vollständige Datenvolume
+sichern. Eine Tour enthält Titel, Datum, Zeitzone, optional Beginn und Ende,
+GPX-Datei sowie Komoot-Link.
 
 Bestätigt ist eine zeitbasierte Fotozuordnung. Der bearbeitbare
 Tour-Zeitraum bestimmt anhand des Aufnahmezeitpunkts, welche Fotos aus dem
@@ -123,12 +135,22 @@ in der gewählten Zeitzone eingeschlossen; Beginn und Ende können bei Bedarf
 als Vorschlag bleibt eine noch nicht beschlossene Zusatzoption und darf
 manuell gewählte Zeiten nicht ungefragt überschreiben.
 
-Die gewählte Zeitzone muss für Tour-Zeitraum und Fotozeitpunkt konsistent
-sein. Fehlende Zeitangaben, manuelle Korrekturen, Zeiträume über Mitternacht
-und die genaue Behandlung der Intervallgrenzen sind vor der Umsetzung zu
-klären. Eine Tourauswahl muss Galerie und Kartenmarker gemeinsam filtern;
-der Filter muss vor der Fotopaginierung greifen, nicht nur auf der gerade
-geladenen Seite. Immich-Assets werden dabei nicht verändert.
+Der Immich-Aufnahmezeitpunkt `fileCreatedAt` wird für den Vergleich in die
+gewählte IANA-Zeitzone umgerechnet. Beginn ist inklusive, Ende exklusiv;
+ohne Uhrzeiten gilt der gesamte lokale Kalendertag einschließlich seiner
+Sommerzeitregeln. Zeitfenster über Mitternacht werden in dieser Version
+abgewiesen. Fotos ohne verwertbaren Aufnahmezeitpunkt bleiben in der
+Albumübersicht, werden jedoch keiner datierten Tour automatisch zugeordnet.
+Manuelle Ausnahmen je Foto sind noch nicht umgesetzt.
+
+Die Übersicht zeigt alle Albumfotos. Datums-Tabs wählen eine Tour; Galerie
+und Kartenmarker verwenden denselben Zeitfilter. Das Backend liest dafür
+bei Bedarf alle Metadatenseiten des Albums und filtert vor der Ausgabe der
+Fotoseiten mit je 48 Einträgen. Der ungefilterte Albumzugriff bleibt paginiert.
+Immich-Assets werden nicht verändert. GPX, Kartenbilder und Kommentare
+gehören jeweils zur ausgewählten Tour. Tour-Deep-Links verwenden
+`/?album=<Album-ID>&tour=<Tour-ID>`, eine explizite Übersicht
+`/?album=<Album-ID>&view=overview`.
 
 Ein Reisebericht könnte auf Albumebene Texte, ausgewählte Immich-Fotos und
 Tourverweise zu Kapiteln verbinden. Fotos würden referenziert, nicht in neue
@@ -204,6 +226,10 @@ regulären Screenshot-Endpunkt erfolgreich aufgenommen und gespeichert.
 |---|---|---|
 | `GET` | `/api/albums` | Immich-Alben abrufen |
 | `GET` | `/api/albums/:albumId` | Album inklusive Assets abrufen |
+| `GET` | `/api/albums/:albumId/tours` | Touren des Albums auflisten |
+| `POST` | `/api/albums/:albumId/tours` | Tour mit Datum und Zeitzone anlegen |
+| `GET` | `/api/albums/:albumId/assets` | Fotoseite; optional nach `tourId` filtern |
+| `GET` | `/api/albums/:albumId/map-markers` | Foto-Standorte; optional nach `tourId` filtern |
 | `GET` | `/api/assets/:assetId/thumbnail` | Immich-Vorschaubild serverseitig abrufen |
 | `GET` | `/api/tours/:albumId` | Tour-Zusatzdaten lesen |
 | `PUT` | `/api/tours/:albumId` | Tourart und Tour-Zusatzdaten anlegen/ändern |
@@ -217,6 +243,11 @@ regulären Screenshot-Endpunkt erfolgreich aufgenommen und gespeichert.
 | `GET` | `/api/auth/session` | Anmeldestatus abrufen |
 | `POST` | `/api/auth/login` | Mit gemeinsamem App-Passwort anmelden |
 | `POST` | `/api/auth/logout` | Abmelden |
+
+Tour-Ressourcen unterstützen `?tourId=<Tour-ID>`. Die ID wird stets zusammen
+mit der Album-ID geprüft; eine fremde oder unbekannte Tour liefert 404.
+Ohne ID bleiben alte Album-URLs kompatibel: eine undatierte Tour hat Vorrang,
+ansonsten wird die früheste datierte Tour verwendet.
 
 Der API-Key wird nur serverseitig an Immich gesendet. Alle schreibenden
 API-Routen sind durch ein gemeinsames App-Passwort geschützt. Eine erfolgreiche

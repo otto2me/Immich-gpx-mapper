@@ -11,6 +11,13 @@
 ○ GPX-Track, Komoot-Karte und Höhenprofil derselben Tour zuordnen und gemeinsam beim Immich-Album anzeigen
 ○ Georeferenzierte Fotos des Immich-Albums als anklickbare Vorschaubilder an ihren GPS-Positionen auf der GPX-Karte anzeigen
 ○ Albumfotos in einer ein- und ausklappbaren Galerie anzeigen und per Klick im Immich-Album-Viewer öffnen
+○ Urlaubsalben mit mehreren Touren unterstützen, höchstens eine Tour pro Kalendertag und Album
+○ Albumübersicht und Datums-Tabs; Tour mit Titel, Datum, Zeitzone und optionalem Beginn/Ende
+○ Standardmäßig ganzer lokaler Tag; Beginn inklusive, Ende exklusiv; Zeitfenster innerhalb desselben Tages
+○ Tourgalerie und Kartenmarker gemeinsam nach Aufnahmezeitpunkt filtern, vor der Fotopaginierung
+○ GPX-Dateien, Komoot-Bilder und Kommentare je Tour getrennt verwalten; bestehende Daten bei Migration erhalten
+○ Reisebericht mit Texten, ausgewählten Fotos und Tourverweisen (geplant)
+○ Bericht ohne Anmeldung über widerrufbaren Freigabelink teilen; Zugriff nur auf ausgewählte Inhalte (geplant)
 ○ Beschreibung
 ○ Kommentare
 ○ Richtung der Wanderung

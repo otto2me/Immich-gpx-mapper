@@ -8,6 +8,7 @@ import type { Comment, Tour } from "./database.js";
 import { DatabaseSync } from "node:sqlite";
 import { captureKomootScreenshots } from "./komoot-screenshots.js";
 import { publicKomootEmbedUrl } from "./komoot.js";
+import { parseTourSchedule, selectTour } from "./tour-selection.js";
 
 const maxUploadBytes = 20 * 1024 * 1024;
 const allowedImages = new Map([
@@ -17,6 +18,11 @@ const allowedImages = new Map([
 ]);
 
 type TourInput = {
+  title?: unknown;
+  date?: unknown;
+  timeZone?: unknown;
+  startTime?: unknown;
+  endTime?: unknown;
   activityType?: unknown;
   komootLink?: unknown;
   description?: unknown;
@@ -31,6 +37,11 @@ function toApiTour(tour: Tour | undefined) {
   if (!tour) return null;
   return {
     id: tour.id,
+    title: tour.title,
+    date: tour.tour_date,
+    timeZone: tour.time_zone,
+    startTime: tour.start_time,
+    endTime: tour.end_time,
     activityType: tour.activity_type,
     komootLink: tour.komoot_link ?? "",
     description: tour.description ?? "",
@@ -43,14 +54,12 @@ function toApiTour(tour: Tour | undefined) {
   };
 }
 
-function getTour(database: DatabaseSync, albumId: string) {
-  return database
-    .prepare("SELECT * FROM tours WHERE immich_album_id = ?")
-    .get(albumId) as Tour | undefined;
+function getTour(database: DatabaseSync, albumId: string, query?: unknown) {
+  return selectTour(database, albumId, query);
 }
 
-function ensureTour(database: DatabaseSync, albumId: string) {
-  const found = getTour(database, albumId);
+function ensureTour(database: DatabaseSync, albumId: string, query?: unknown) {
+  const found = getTour(database, albumId, query);
   if (found) return found;
   const now = new Date().toISOString();
   const id = randomUUID();
@@ -101,7 +110,7 @@ export async function registerTourRoutes(
 
   app.get("/api/tours/komoot-linked-albums", async () => {
     const rows = database.prepare(`
-      SELECT immich_album_id
+      SELECT DISTINCT immich_album_id
       FROM tours
       WHERE komoot_link IS NOT NULL AND TRIM(komoot_link) != ''
     `).all() as Array<{ immich_album_id: string }>;
@@ -109,8 +118,40 @@ export async function registerTourRoutes(
   });
 
   app.get<{ Params: { albumId: string } }>(
+    "/api/albums/:albumId/tours",
+    async (request) => (database.prepare(
+      "SELECT * FROM tours WHERE immich_album_id = ? ORDER BY tour_date IS NOT NULL, tour_date, id"
+    ).all(request.params.albumId) as Tour[]).map(toApiTour)
+  );
+
+  app.post<{ Params: { albumId: string }; Body: TourInput }>(
+    "/api/albums/:albumId/tours",
+    async (request, reply) => {
+      const schedule = parseTourSchedule(request.body ?? {});
+      if (!schedule.date) return reply.code(400).send({ message: "Bitte ein Tourdatum wählen" });
+      let title: string | null;
+      try {
+        title = normalizeText(request.body?.title, "Titel", 160);
+      } catch (error) {
+        if (error instanceof ValidationError) return reply.code(400).send({ message: error.message });
+        throw error;
+      }
+      if (database.prepare("SELECT id FROM tours WHERE immich_album_id = ? AND tour_date = ?").get(request.params.albumId, schedule.date)) {
+        return reply.code(409).send({ message: "Für diesen Tag gibt es bereits eine Tour" });
+      }
+      const id = randomUUID();
+      const now = new Date().toISOString();
+      database.prepare(`INSERT INTO tours
+        (id, immich_album_id, title, tour_date, time_zone, start_time, end_time, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(id, request.params.albumId, title ?? "", schedule.date, schedule.zone, schedule.start, schedule.end, now, now);
+      return reply.code(201).send(toApiTour(getTour(database, request.params.albumId, { tourId: id })));
+    }
+  );
+
+  app.get<{ Params: { albumId: string } }>(
     "/api/tours/:albumId",
-    async (request) => toApiTour(getTour(database, request.params.albumId))
+    async (request) => toApiTour(getTour(database, request.params.albumId, request.query))
   );
 
   app.put<{ Params: { albumId: string }; Body: TourInput }>(
@@ -119,7 +160,12 @@ export async function registerTourRoutes(
       try {
         const { activityType, komootLink, description, direction, distanceKm, elevationGainM } =
           request.body ?? {};
-        const existing = getTour(database, request.params.albumId);
+        const existing = getTour(database, request.params.albumId, request.query);
+        const schedule = parseTourSchedule(request.body ?? {}, existing);
+        const title = normalizeText(request.body?.title ?? existing?.title, "Titel", 160);
+        const duplicate = database.prepare("SELECT id FROM tours WHERE immich_album_id = ? AND tour_date IS ? AND id != ?")
+          .get(request.params.albumId, schedule.date, existing?.id ?? "");
+        if (duplicate) return reply.code(409).send({ message: "Für diesen Tag gibt es bereits eine Tour" });
         const normalizedActivity =
           activityType ?? existing?.activity_type ?? "hike";
         if (normalizedActivity !== "hike" && normalizedActivity !== "bike") {
@@ -151,13 +197,14 @@ export async function registerTourRoutes(
         }
         const distance = normalizeNumber(distanceKm, "Distanz");
         const elevation = normalizeNumber(elevationGainM, "Höhenmeter");
-        const tour = ensureTour(database, request.params.albumId);
+        const tour = ensureTour(database, request.params.albumId, request.query);
         const komootLinkChanged = tour.komoot_link !== link;
         const updatedAt = new Date().toISOString();
         database.prepare(`
           UPDATE tours SET
             activity_type = ?, komoot_link = ?, description = ?, direction = ?,
             distance_km = ?, elevation_gain_m = ?,
+            title = ?, tour_date = ?, time_zone = ?, start_time = ?, end_time = ?,
             komoot_map_image_path = CASE WHEN komoot_link IS ? THEN komoot_map_image_path ELSE NULL END,
             elevation_profile_image_path = CASE WHEN komoot_link IS ? THEN elevation_profile_image_path ELSE NULL END,
             updated_at = ?
@@ -169,6 +216,11 @@ export async function registerTourRoutes(
           directionValue,
           distance,
           elevation,
+          title ?? "",
+          schedule.date,
+          schedule.zone,
+          schedule.start,
+          schedule.end,
           link,
           link,
           updatedAt,
@@ -182,7 +234,7 @@ export async function registerTourRoutes(
             await rm(uploadPath(config, tour.elevation_profile_image_path), { force: true });
           }
         }
-        return toApiTour(getTour(database, request.params.albumId));
+        return toApiTour(getTour(database, request.params.albumId, request.query));
       } catch (error) {
         if (error instanceof ValidationError) {
           return reply.code(400).send({ message: error.message });
@@ -205,7 +257,7 @@ export async function registerTourRoutes(
         return reply.code(400).send({ message: "Die Datei enthält kein gültiges GPX-Dokument" });
       }
 
-      const tour = ensureTour(database, request.params.albumId);
+      const tour = ensureTour(database, request.params.albumId, request.query);
       const previous = tour.gpx_file_path;
       const storedPath = await saveUpload(config, content, ".gpx");
       database.prepare(`
@@ -243,7 +295,7 @@ export async function registerTourRoutes(
         });
       }
 
-      const tour = ensureTour(database, request.params.albumId);
+      const tour = ensureTour(database, request.params.albumId, request.query);
       const mapPath = await saveUpload(config, screenshots.mapImage, ".png");
       let elevationPath: string | null = null;
       try {
@@ -276,14 +328,14 @@ export async function registerTourRoutes(
       if (tour.elevation_profile_image_path) {
         await rm(uploadPath(config, tour.elevation_profile_image_path), { force: true });
       }
-      return reply.code(201).send(toApiTour(getTour(database, request.params.albumId)));
+      return reply.code(201).send(toApiTour(getTour(database, request.params.albumId, request.query)));
     }
   );
 
   app.get<{ Params: { albumId: string } }>(
     "/api/tours/:albumId/gpx",
     async (request, reply) => {
-      const tour = getTour(database, request.params.albumId);
+      const tour = getTour(database, request.params.albumId, request.query);
       if (!tour?.gpx_file_path) {
         return reply.code(404).send({ message: "Für dieses Album ist keine GPX-Datei vorhanden" });
       }
@@ -311,7 +363,7 @@ export async function registerTourRoutes(
         return reply.code(415).send({ message: "Erlaubt sind JPEG-, PNG- und WebP-Bilder" });
       }
 
-      const tour = ensureTour(database, request.params.albumId);
+      const tour = ensureTour(database, request.params.albumId, request.query);
       const field =
         request.params.kind === "komoot-map"
           ? "komoot_map_image_path"
@@ -328,7 +380,7 @@ export async function registerTourRoutes(
   app.get<{ Params: { albumId: string; kind: string } }>(
     "/api/tours/:albumId/images/:kind",
     async (request, reply) => {
-      const tour = getTour(database, request.params.albumId);
+      const tour = getTour(database, request.params.albumId, request.query);
       const storedPath =
         request.params.kind === "komoot-map"
           ? tour?.komoot_map_image_path
@@ -357,7 +409,7 @@ export async function registerTourRoutes(
   app.get<{ Params: { albumId: string } }>(
     "/api/tours/:albumId/comments",
     async (request) => {
-      const tour = getTour(database, request.params.albumId);
+      const tour = getTour(database, request.params.albumId, request.query);
       if (!tour) return [];
       return database.prepare(`
         SELECT id, tour_id, author, text, created_at FROM comments
@@ -384,7 +436,7 @@ export async function registerTourRoutes(
     if (!text) {
       return reply.code(400).send({ message: "Kommentar darf nicht leer sein" });
     }
-    const tour = ensureTour(database, request.params.albumId);
+    const tour = ensureTour(database, request.params.albumId, request.query);
     const comment: Comment = {
       id: randomUUID(),
       tour_id: tour.id,

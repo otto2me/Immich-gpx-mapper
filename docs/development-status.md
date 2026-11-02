@@ -10,10 +10,48 @@ App-Passwort geschützt.
 
 ## Aktueller Auftrag
 
-Die Komoot-Screenshot-Erstellung und das Abmelden wurden korrigiert und lokal
-geprüft. Als nächste Erweiterungen werden mehrere Touren je Album mit
-Datumsnavigation sowie ein bebilderter Reisebericht diskutiert. Diese
-Erweiterungen sind noch nicht umgesetzt; Reihenfolge und Details sind offen.
+Mehrere Touren je Album mit Datumsnavigation, optionalen Zeitfenstern und
+gemeinsamer Foto-/Kartenfilterung sind umgesetzt und lokal geprüft.
+Reisebericht und widerrufbare Freigabelinks ohne Anmeldung bleiben die
+nachfolgenden, noch nicht implementierten Erweiterungen.
+
+## Mehrtag-Alben: Umsetzung und Prüfung
+
+- Mehrere Touren pro Album mit Titel, Datum, IANA-Zeitzone und optionalen
+  Beginn-/Endzeiten; höchstens eine Tour pro Album und Kalendertag.
+- Übersicht für das gesamte Album und tastaturbedienbare Datums-Tabs.
+  Ohne Uhrzeiten gilt der ganze lokale Tag. Beginn ist inklusive, Ende
+  exklusiv; Zeitfenster über Mitternacht werden abgewiesen.
+- Transaktionale SQLite-Migration erhält Tour-IDs, Kommentare und
+  Upload-Verweise. Bestehende Touren erscheinen zunächst „Ohne Datum“ und
+  können später datiert werden. Vor produktiven Updates das Datenvolume sichern.
+- Alle Tour-Ressourcen prüfen die ausgewählte Tour gegen das Album.
+  GPX-Dateien, Bilder und Kommentare sind zwischen den Touren getrennt.
+- Fotos werden anhand ihres Aufnahmezeitpunkts in der gewählten Zeitzone
+  gefiltert, bevor die Fotopaginierung erfolgt. Die Kartenmarker verwenden
+  denselben Filter. Fotos ohne auswertbare Zeit bleiben in der Übersicht.
+- Die Metadatenseiten eines Albums werden für datierte Touren vollständig
+  gelesen. Bei sehr großen Alben entstehen dadurch zusätzliche API-Abrufe;
+  ein Metadaten-Cache ist noch nicht implementiert.
+- Frontend-/Backend-Gesamtbuild erfolgreich. Drei automatisierte Tests in
+  `backend/test/tours.test.mjs` prüfen Migration mit älterem Schema,
+  Zeitzonen/Sommerzeit/Intervallgrenzen sowie Tour-API, Schreibschutz,
+  doppelte Tage, Datei-/Kommentartrennung und Fotopaginierung über 1.200 Assets.
+- Browserprüfung mit realem Immich-Album und eigener Testdatenbank:
+  22 Albumfotos, zweiter Tourtag ohne Fotos, eingegrenztes Zeitfenster mit
+  vier Fotos und genau vier zugehörigen GPS-Markern. GPX-Upload erfolgreich.
+- Tourauswahl bleibt nach Neuladen erhalten. Pfeiltasten wechseln die Tabs,
+  ohne den Fokus zu verlieren. Desktop bei 1280 Pixeln und Mobilansicht bei
+  390 Pixeln visuell geprüft; kein horizontaler Überlauf.
+- Nicht enthalten: Reisebericht, öffentliche Berichtsfreigabe,
+  automatische GPX-Zeitübernahme und manuelle Fotoausnahmen.
+
+Tests nach einem Build ausführen:
+
+```sh
+npm run build
+node --test backend/test/tours.test.mjs
+```
 
 ## Aktualisierung vom 02.11.2026
 
@@ -141,6 +179,11 @@ Erweiterungen sind noch nicht umgesetzt; Reihenfolge und Details sind offen.
 - `backend/src/komoot.ts`
 - `backend/src/komoot-screenshots.ts`
 - `backend/src/tours.ts`
+- `backend/src/database.ts`
+- `backend/src/tour-selection.ts`
+- `backend/src/immich.ts`
+- `backend/src/server.ts`
+- `backend/test/tours.test.mjs`
 - `backend/package.json`
 - `package-lock.json`
 - `docs/architecture.md`
@@ -176,8 +219,9 @@ Erweiterungen sind noch nicht umgesetzt; Reihenfolge und Details sind offen.
 ## Ergebnis
 
 Die commit-basierte Footer-Version, lokale Komoot-Screenshots und die
-Logout-Korrektur sind implementiert und geprüft. Mehrere Touren pro Album,
-Datumsnavigation und Reiseberichte sind noch nicht implementiert.
+Logout-Korrektur sowie mehrere Touren pro Album mit zeitbasierter
+Fotozuordnung sind implementiert und geprüft. Reiseberichte und deren
+Freigabelinks sind noch nicht implementiert.
 
 ## Noch offene Integrationsprüfungen
 

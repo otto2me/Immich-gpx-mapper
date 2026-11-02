@@ -115,6 +115,29 @@ auf der GPX-Karte. Die Albumfotos lassen sich über **Albumfotos** ein- und
 ausklappen. Ein Klick öffnet das Foto im Immich-Album-Viewer; dafür muss
 `IMMICH_WEB_URL` auf eine vom Browser erreichbare Immich-Adresse zeigen.
 
+### Mehrere Touren in einem Urlaubsalbum
+
+Über **Tour anlegen** eine Tour mit Datum und Zeitzone hinzufügen. Je Album
+ist eine Tour pro Tag möglich. Die **Übersicht** zeigt weiterhin alle Fotos;
+die Datums-Tabs zeigen die jeweilige Tour mit eigenen GPX-Dateien, Bildern
+und Kommentaren.
+
+Standardmäßig gehören alle Fotos des lokalen Tourtages zur Auswahl.
+**Beginn** und **Ende** grenzen diese nach dem Aufnahmezeitpunkt ein; Beginn
+ist inklusive, Ende exklusiv. **Tourdaten speichern** aktualisiert Galerie
+und Kartenmarker gemeinsam. Die Zeitzone sollte zum Aufnahmeort passen,
+nicht zwingend zum aktuellen Standort des Browsers. Zeitfenster über
+Mitternacht werden noch nicht unterstützt. Immich-Alben werden dabei weder
+aufgeteilt noch verändert.
+
+Vorhandene Touren bleiben nach der automatischen Datenbankmigration als
+**Ohne Datum** erhalten. Ein Datum kann nachträglich zugeordnet werden.
+Fotos ohne gültigen Aufnahmezeitpunkt bleiben in der Übersicht sichtbar.
+Vor einem produktiven Update das komplette Mapper-Datenverzeichnis sichern.
+
+Reiseberichte und widerrufbare öffentliche Freigabelinks sind geplant,
+aber noch nicht implementiert.
+
 Die Tourart (Wanderung oder Fahrradtour) lässt sich beim Bearbeiten eines Albums
 festlegen. Sie wird gemeinsam mit den übrigen Tourdaten gespeichert.
 
