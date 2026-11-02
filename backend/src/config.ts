@@ -19,6 +19,8 @@ export type AppConfig = {
   immichApiKey: string;
   appPassword: string;
   dataDir: string;
+  backupDir: string;
+  configFile: string;
   port: number;
 };
 
@@ -74,6 +76,7 @@ export function loadConfig(): AppConfig {
   const fileConfig = readFileConfig(configFile);
   const port = Number(process.env.PORT ?? "3000");
   const appPassword = process.env.APP_PASSWORD ?? "";
+  const dataDir = process.env.DATA_DIR ?? "/data";
 
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error("PORT must be an integer between 1 and 65535");
@@ -90,7 +93,9 @@ export function loadConfig(): AppConfig {
     immichWebUrl: readImmichWebUrl(),
     immichApiKey: process.env.IMMICH_API_KEY ?? fileConfig.immichApiKey ?? "",
     appPassword,
-    dataDir: process.env.DATA_DIR ?? "/data",
+    dataDir,
+    backupDir: process.env.BACKUP_DIR ?? resolve(dataDir, "backups"),
+    configFile,
     port
   };
 }

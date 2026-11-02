@@ -5,6 +5,8 @@
   import GpxMap from "../lib/GpxMap.svelte";
   import ReportEditor from "../lib/ReportEditor.svelte";
   import SharedReport from "../lib/SharedReport.svelte";
+  import SettingsPage from "../lib/SettingsPage.svelte";
+  import { Settings } from "@lucide/svelte";
   import {
     api,
     emptyTour,
@@ -25,6 +27,10 @@
   let albumsPage = $state(1);
   let selectedAlbum = $state<Album | null>(null);
   let shareToken = $state("");
+  let settingsView = $state(false);
+  let settingsBusy = $state(false);
+  let sharingEnabled = $state(true);
+  let defaultKomootMode = $state<"embed" | "local">("embed");
   let albumView = $state<"tours" | "report">("report");
   let reportDirty = $state(false);
   let reportSaving = $state(false);
@@ -70,6 +76,7 @@
     komootPreview ? komootEmbedUrl(tour.komootLink) : null
   );
   const tourEmbedUrl = $derived(komootEmbedUrl(tour.komootLink));
+  const showKomootEmbed = $derived(komootDisplayMode === "embed" || (!tour.hasKomootMap && !tour.hasElevationProfile));
   const albumAssetsTotalPages = $derived(
     Math.max(1, Math.ceil(albumAssetsTotal / albumAssetsPageSize))
   );
@@ -116,7 +123,7 @@
     notice = "";
     komootPreview = null;
     komootPreviewApplied = false;
-    komootDisplayMode = "embed";
+    komootDisplayMode = defaultKomootMode;
     albumAssets = [];
     albumAssetsPage = 0;
     albumAssetsPageSize = 48;
@@ -169,7 +176,7 @@
     albumAssetsLoading = false;
     albumAssetsError = "";
     komootPreview = null;
-    komootDisplayMode = "embed";
+    komootDisplayMode = defaultKomootMode;
     selectingTour = true;
     error = "";
     if (updateLocation) {
@@ -286,8 +293,12 @@
   async function initialize() {
     shareToken = new URLSearchParams(location.hash.slice(1)).get("share") ?? "";
     if (shareToken) { loading = false; return; }
+    settingsView = new URLSearchParams(location.search).get("view") === "settings";
     try {
-      immichWebUrl = (await api.publicConfig()).immichWebUrl;
+      const config = await api.publicConfig();
+      immichWebUrl = config.immichWebUrl;
+      sharingEnabled = config.sharingEnabled ?? true;
+      defaultKomootMode = config.komootDefault ?? "embed";
     } catch {
       immichWebUrl = null;
     }
@@ -296,6 +307,7 @@
     } catch (reason) {
       error = message(reason);
     }
+    if (settingsView) { loading = false; return; }
     const albumId = new URLSearchParams(location.search).get("album");
     if (albumId) {
       await loadAlbum(albumId);
@@ -305,6 +317,8 @@
   }
 
   function syncFromLocation() {
+    settingsView = new URLSearchParams(location.search).get("view") === "settings";
+    if (settingsView) return;
     const previousShare = shareToken;
     shareToken = new URLSearchParams(location.hash.slice(1)).get("share") ?? "";
     if (shareToken) { selectedAlbum = null; return; }
@@ -333,6 +347,8 @@
   }
 
   function backToAlbums() {
+    if (settingsBusy) return;
+    settingsView = false;
     if (reportSaving) return;
     if (reportDirty && !confirm("Ungespeicherte Änderungen am Reisebericht verwerfen?")) return;
     reportDirty = false;
@@ -363,6 +379,7 @@
   }
 
   async function logout() {
+    if (settingsBusy) return;
     if (reportSaving) return;
     if (reportDirty && !confirm("Ungespeicherte Änderungen am Reisebericht verwerfen und abmelden?")) return;
     try {
@@ -438,7 +455,7 @@
   function clearKomootPreview() {
     komootPreview = null;
     komootPreviewApplied = false;
-    komootDisplayMode = "embed";
+    komootDisplayMode = defaultKomootMode;
   }
 
   function applyKomootPreview() {
@@ -517,6 +534,27 @@
     albumView = "tours";
     await selectTour(id);
   }
+
+  function openSettings() {
+    if (reportSaving || settingsBusy) return;
+    if (reportDirty && !confirm("Ungespeicherte Änderungen am Reisebericht verwerfen?")) return;
+    reportDirty = false;
+    settingsView = true;
+    pushState("/?view=settings", {});
+  }
+
+  function settingsSaved(settings: import("../lib/api.js").AppSettings) {
+    sharingEnabled = settings.sharingEnabled;
+    defaultKomootMode = settings.komootDefault;
+    komootDisplayMode = settings.komootDefault;
+  }
+
+  function backupRestored(result: import("../lib/api.js").RestoreResult) {
+    authenticated = false;
+    reportDirty = false;
+    settingsBusy = false;
+    notice = `Sicherung wiederhergestellt. Bitte den Container neu starten und erneut anmelden. Sicherheitskopie: ${result.safetyBackup}${result.warning ? ` · ${result.warning}` : ""}`;
+  }
 </script>
 
 <svelte:head>
@@ -538,8 +576,9 @@
   </a>
   {#if !shareToken}<div class="auth">
     {#if authenticated}
+      <button class="quiet-button settings-button" type="button" title="Einstellungen" aria-label="Einstellungen" disabled={reportSaving || settingsBusy} onclick={openSettings}><Settings size={19} /></button>
       <span class="auth-state"><span class="dot"></span> Bearbeitungsmodus</span>
-      <button class="quiet-button" disabled={reportSaving} onclick={logout}>Abmelden</button>
+      <button class="quiet-button" disabled={reportSaving || settingsBusy} onclick={logout}>Abmelden</button>
     {:else}
       <form class="login-form" onsubmit={login}>
         <label class="sr-only" for="app-password">App-Passwort</label>
@@ -574,6 +613,9 @@
 
   {#if shareToken}
     {#key shareToken}<SharedReport token={shareToken} />{/key}
+  {:else if settingsView}
+    <button class="back-link" disabled={settingsBusy} onclick={backToAlbums}>← Alle Alben</button>
+    {#if authenticated}<SettingsPage onSaved={settingsSaved} onRestored={backupRestored} bind:busy={settingsBusy} />{:else}<h1>Einstellungen</h1><p>Für Einstellungen und Sicherungen bitte anmelden.</p>{/if}
   {:else if selectedAlbum}
     <button class="back-link" disabled={reportSaving} onclick={backToAlbums}>← Alle Alben</button>
     <section class="album-heading">
@@ -598,7 +640,7 @@
     </div>
 
     {#if albumView === "report"}
-      {#key `${selectedAlbum.id}:${authenticated}`}<ReportEditor album={selectedAlbum} {tours} canEdit={authenticated} onOpenTour={openReportTour} bind:dirty={reportDirty} bind:saving={reportSaving} />{/key}
+      {#key `${selectedAlbum.id}:${authenticated}`}<ReportEditor album={selectedAlbum} {tours} canEdit={authenticated} {sharingEnabled} onOpenTour={openReportTour} bind:dirty={reportDirty} bind:saving={reportSaving} />{/key}
     {:else}
     <nav class="tour-navigation" aria-label="Touren im Album">
       <div class="tour-tabs" role="tablist" tabindex="-1" aria-label="Tagesauswahl" onkeydown={onTourTabKeydown}>
@@ -949,19 +991,19 @@
                 <button
                   class:active={komootDisplayMode === "embed"}
                   type="button"
-                  aria-pressed={komootDisplayMode === "embed"}
+                  aria-pressed={showKomootEmbed}
                   onclick={() => (komootDisplayMode = "embed")}
                 >Komoot online</button>
                 <button
                   class:active={komootDisplayMode === "local"}
                   type="button"
-                  aria-pressed={komootDisplayMode === "local"}
+                  aria-pressed={!showKomootEmbed}
                   onclick={() => (komootDisplayMode = "local")}
                 >Lokale Bilder</button>
               </div>
             {/if}
 
-            {#if tourEmbedUrl && komootDisplayMode === "embed" && !komootPreview}
+            {#if tourEmbedUrl && showKomootEmbed && !komootPreview}
               <div class="komoot-tour-embed">
                 <iframe
                   class="komoot-embed"
@@ -976,7 +1018,7 @@
             {/if}
 
             {#if (tour.hasKomootMap || tour.hasElevationProfile) &&
-              (!tourEmbedUrl || komootDisplayMode === "local")}
+              (!tourEmbedUrl || !showKomootEmbed)}
               <div class="preview-images">
                 {#if tour.hasKomootMap}
                   <figure>
@@ -1159,6 +1201,7 @@
 </footer>
 
 <style>
+  .settings-button { display: inline-grid; place-items: center; flex: 0 0 38px; width: 38px; height: 38px; padding: 8px; }
   .album-view-toggle { margin: 24px 0 12px; }
   .tour-navigation { display: flex; align-items: center; gap: 12px; min-width: 0; margin: 20px 0; }
   .tour-tabs { display: flex; gap: 4px; overflow-x: auto; min-width: 0; flex: 1; border-bottom: 1px solid #d5ddd7; }

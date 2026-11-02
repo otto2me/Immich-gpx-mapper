@@ -30,6 +30,11 @@ export function isAuthenticated(request: FastifyRequest) {
   return true;
 }
 
+export function clearSessions() {
+  sessions.clear();
+  failedLogins.clear();
+}
+
 function setSessionCookie(
   reply: FastifyReply,
   request: FastifyRequest,

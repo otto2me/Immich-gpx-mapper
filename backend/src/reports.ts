@@ -5,6 +5,7 @@ import { isAuthenticated } from "./auth.js";
 import { parseTourSchedule } from "./tour-selection.js";
 import { toApiTour } from "./tours.js";
 import type { Tour } from "./database.js";
+import { readSettings } from "./settings.js";
 
 type ReportPhoto = { assetId: string; caption: string };
 type Chapter = { id: string; title: string; date: string | null; text: string; tourId: string | null; photos: ReportPhoto[] };
@@ -61,9 +62,14 @@ export async function registerReportRoutes(
       WHERE report_id = ? ORDER BY created_at DESC, id`).all(reportId) as ShareRow[];
   }
 
+  function requireSharing() {
+    if (!readSettings(database).sharingEnabled) throw Object.assign(new Error("Teilen ist in den Einstellungen deaktiviert"), { statusCode: 403 });
+  }
+
   app.get<{ Params: { albumId: string } }>(
     "/api/albums/:albumId/report/shares", { preHandler: requireLogin },
     async (request, reply) => {
+      requireSharing();
       reply.header("cache-control", "no-store");
       const report = getReport(request.params.albumId);
       return report ? sharesFor(report.id) : [];
@@ -73,6 +79,7 @@ export async function registerReportRoutes(
   app.post<{ Params: { albumId: string }; Body: unknown }>(
     "/api/albums/:albumId/report/shares", { preHandler: requireLogin },
     async (request, reply) => {
+      requireSharing();
       const report = getReport(request.params.albumId);
       if (!report) return reply.code(404).send({ message: "Bitte zuerst den Reisebericht speichern" });
       const input = object(request.body);
@@ -114,6 +121,7 @@ export async function registerReportRoutes(
     reply.header("x-robots-tag", "noindex, nofollow");
     const token = request.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
     const invalidLink = () => reply.code(404).send({ message: "Freigabelink ist ungültig, abgelaufen oder widerrufen" });
+    if (!readSettings(database).sharingEnabled) return invalidLink();
     if (!token) return invalidLink();
     const hash = createHash("sha256").update(token).digest("hex");
     const row = database.prepare(`SELECT reports.* FROM report_shares

@@ -84,6 +84,17 @@ export type ReportShare = {
 
 export type SharedReportData = { report: TravelReport; albumId: string; tours: Tour[] };
 
+export type AppSettings = {
+  sharingEnabled: boolean;
+  komootDefault: "embed" | "local";
+  backupMode: "off" | "interval" | "changes" | "both";
+  backupIntervalDays: number;
+  backupKeep: number;
+};
+export type BackupInfo = { name: string; size: number; createdAt: string; kind: "backup" | "safety" };
+export type BackupStatus = { directory: string; operation: "backup" | "restore" | null; dirty: boolean; lastBackupAt: string | null; lastBackupName: string | null; lastError: string | null };
+export type RestoreResult = { restored: boolean; safetyBackup: string; restartRequired: boolean; warning?: string };
+
 export type KomootPreview = {
   title: string;
   description: string;
@@ -143,7 +154,16 @@ export function tourResource(albumId: string, suffix = "", tourId?: string | nul
 }
 
 export const api = {
-  publicConfig: () => request<{ immichWebUrl: string | null }>("/api/config"),
+  publicConfig: () => request<{ immichWebUrl: string | null; sharingEnabled: boolean; komootDefault: "embed" | "local" }>("/api/config"),
+  settings: () => request<{ settings: AppSettings; backup: BackupStatus }>("/api/settings"),
+  saveSettings: (settings: AppSettings) => request<{ settings: AppSettings; backup: BackupStatus }>("/api/settings", { method: "PUT", body: JSON.stringify(settings) }),
+  backups: () => request<{ items: BackupInfo[]; status: BackupStatus }>("/api/backups"),
+  createBackup: () => request<BackupInfo>("/api/backups", { method: "POST" }),
+  restoreBackup: (file: File) => {
+    const body = new FormData();
+    body.append("file", file);
+    return request<RestoreResult>("/api/backups/restore", { method: "POST", body });
+  },
   session: () => request<{ authenticated: boolean }>("/api/auth/session"),
   login: (password: string) =>
     request<{ authenticated: boolean }>("/api/auth/login", {

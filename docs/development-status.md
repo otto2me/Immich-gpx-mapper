@@ -17,6 +17,38 @@ und lokal geprüft. Verwaltbare Freigabelinks mit optionaler Ablaufzeit und
 Widerruf sind ebenfalls umgesetzt. Der normale Albumbericht bleibt bewusst
 ohne Anmeldung lesbar.
 
+## Einstellungen und ZIP-Backups
+
+- Angemeldete Nutzer erreichen über das Zahnrad eine Einstellungsseite.
+  Teilefunktion und lokale/Remote-Komoot-Standardansicht sind persistent.
+  Vorhandene Links werden bei deaktiviertem Teilen serverseitig gesperrt;
+  der normale offene Berichtszugriff bleibt bestehen.
+- Streaming-ZIP mit SQLite-Snapshot, Uploads, optionaler Dateikonfiguration
+  und SHA-256-Manifest. NAS-Ziel über `BACKUP_DIR`; Compose-Beispiel mountet
+  einen separaten `/backups`-Ordner. Keine Immich-Originale oder `.env`-Dateien.
+- Automatik: aus, Intervall von 1–365 Tagen, Änderungen oder Kombination.
+  Änderungsbackups bündeln 30 Sekunden; Zeitprüfung minütlich. Konfigurierbare
+  Aufbewahrung von 1–365 Mapper-ZIPs, einschließlich Import-Sicherheitskopien.
+- Import mit expliziter Bestätigung, sicheren Pfaden, Größenbegrenzung,
+  Prüfsummen-/Schema-/Referenzprüfung und zwingendem Sicherheitsbackup vorab.
+  Wiederherstellung mit Transaktion, Dateijournal und Wiederanlaufprüfung.
+  Nach erfolgreichem Import werden Sitzungen ungültig; Neustart erforderlich.
+- Frontend-Build und Backend-Build erfolgreich. Insgesamt 13 Tests bestehen:
+  Einstellungen, Zugriffsrechte, vollständiger ZIP-Roundtrip, Aufbewahrung,
+  Scheduler, ungültige Archive, ZIP-Traversal, Wiederanlauf sowie bisherige
+  Tour-/Berichts-/Freigabe-Regressionen.
+- Isolierte Browserprüfung: anonyme Einstellungen-/Backup-GETs HTTP 401;
+  Optionen gespeichert; ZIP erstellt und heruntergeladen; echte UI-Import-
+  Bestätigung, Wiederherstellung der Werte und Abmeldung erfolgreich.
+  Gesonderte künstliche Tourdaten bestätigen lokale und Remote-Voreinstellung
+  sowie ausgeblendeten Teilebereich. Keine produktiven Daten überschrieben.
+- Desktop bei 1280 und Mobil bei 390 Pixeln geprüft, keine überlaufenden
+  Eingaben. Produktiver NAS-Mount und Berechtigungen müssen beim Deployment
+  geprüft werden; der lokale Ordner ist kein Test des tatsächlichen NAS.
+- Neue ZIP-Abhängigkeiten melden keine Produktions-Advisories. npm meldet
+  weiterhin drei moderate Hinweise über `@fastify/static`/`glob`/`minimatch`;
+  kein sachfremdes Downgrade oder erzwungenes Audit-Fix durchgeführt.
+
 ## Kompaktere Berichtsansicht
 
 - Kapitelbilder stehen am Desktop in zwei Spalten, auf schmalen Bildschirmen
@@ -127,7 +159,7 @@ Tests nach einem Build ausführen:
 
 ```sh
 npm run build
-node --test backend/test/tours.test.mjs backend/test/reports.test.mjs backend/test/report-shares.test.mjs
+node --test backend/test/tours.test.mjs backend/test/reports.test.mjs backend/test/report-shares.test.mjs backend/test/settings.test.mjs backend/test/backups.test.mjs backend/test/admin.test.mjs
 ```
 
 ## Aktualisierung vom 02.11.2026
@@ -268,6 +300,13 @@ node --test backend/test/tours.test.mjs backend/test/reports.test.mjs backend/te
 - `frontend/src/lib/ReportSharing.svelte`
 - `frontend/src/lib/SharedReport.svelte`
 - `backend/test/report-shares.test.mjs`
+- `backend/src/settings.ts`
+- `backend/src/backups.ts`
+- `backend/src/admin.ts`
+- `backend/test/settings.test.mjs`
+- `backend/test/backups.test.mjs`
+- `backend/test/admin.test.mjs`
+- `frontend/src/lib/SettingsPage.svelte`
 - `backend/package.json`
 - `package-lock.json`
 - `docs/architecture.md`

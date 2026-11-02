@@ -4,9 +4,9 @@
   import { api, tourResource, type Album, type Asset, type Tour, type TravelReport, type ReportChapter } from "./api.js";
   import ReportSharing from "./ReportSharing.svelte";
 
-  let { album, tours, canEdit, onOpenTour, loadReport, dirty = $bindable(false), saving = $bindable(false) }: {
+  let { album, tours, canEdit, sharingEnabled = true, onOpenTour, loadReport, dirty = $bindable(false), saving = $bindable(false) }: {
     album: Album; tours: Tour[]; canEdit: boolean; onOpenTour: (id: string) => void | Promise<void>;
-    loadReport?: () => Promise<TravelReport | null>; dirty?: boolean; saving?: boolean
+    sharingEnabled?: boolean; loadReport?: () => Promise<TravelReport | null>; dirty?: boolean; saving?: boolean
   } = $props();
   let draft = $state<TravelReport>({ title: "", introduction: "", chapters: [], revision: 0 });
   let savedSnapshot = $state("");
@@ -165,7 +165,7 @@
     </div>
   </header>
 
-  {#if canEdit && draft.revision > 0}<ReportSharing albumId={album.id} />{/if}
+  {#if canEdit && sharingEnabled && draft.revision > 0}<ReportSharing albumId={album.id} />{/if}
   {#if error}<p class="report-error" role="alert">{error}</p>{/if}
   {#if notice}<p class="report-notice" role="status">{notice}</p>{/if}
   {#if loading}

@@ -2,6 +2,10 @@
 • Docker container
 • Https Nutzung
 • Config und andere Daten auf einem gemounteten Volumen
+• Einstellungsseite nur nach Anmeldung: Teilen aktivieren/deaktivieren, Komoot-Karte/Höhenprofil lokal oder remote standardmäßig anzeigen
+• ZIP-Backup aller Mapper-Daten, Uploads und Dateikonfiguration in einen gemounteten NAS-Sicherungsordner; Immich-Originalfotos und Umgebungsvariablen separat sichern
+• Automatische Sicherungen alle paar Tage, bei Änderungen oder kombiniert; konfigurierbare Anzahl aufzubewahrender ZIPs
+• Manuelle Sicherung, geschützter Download und geprüfter ZIP-Import mit vorheriger Sicherheitskopie und Wiederanlaufprüfung
 • Config parameter für immich API key
 • Nutzung immich UI
 • Immich Zugriff auf Alben

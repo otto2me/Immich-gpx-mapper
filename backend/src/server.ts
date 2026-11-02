@@ -9,9 +9,13 @@ import { registerImmichRoutes } from "./immich.js";
 import { registerTourRoutes } from "./tours.js";
 import { registerKomootRoutes } from "./komoot.js";
 import { registerReportRoutes } from "./reports.js";
+import { registerAdminRoutes } from "./admin.js";
+import { readSettings } from "./settings.js";
+import { recoverInterruptedRestore } from "./backups.js";
 
 const config = loadConfig();
 const database = await openDatabase(config);
+await recoverInterruptedRestore(database, config);
 
 const app = Fastify({
   logger: true,
@@ -23,9 +27,12 @@ const immich = await registerImmichRoutes(app, config, database);
 await registerTourRoutes(app, database, config);
 await registerKomootRoutes(app);
 await registerReportRoutes(app, database, immich.albumContainsAssets);
+await registerAdminRoutes(app, database, config);
 
 app.get("/api/config", async () => ({
-  immichWebUrl: config.immichWebUrl
+  immichWebUrl: config.immichWebUrl,
+  sharingEnabled: readSettings(database).sharingEnabled,
+  komootDefault: readSettings(database).komootDefault
 }));
 
 app.get("/api/health", async () => ({

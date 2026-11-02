@@ -63,8 +63,57 @@ Vorgesehene Konfigurationswerte:
 - `IMMICH_API_KEY`
 - `APP_PASSWORD`
 - `DATA_DIR`
+- `BACKUP_DIR`
 - `CONFIG_FILE`
 - `PORT`
+
+### Einstellungen und Sicherungsdienst
+
+`app_settings` speichert validierte Einstellungen als JSON: Teilen aktiv,
+Komoot-Standardansicht, Backup-Modus, Intervalltage und Aufbewahrungsanzahl.
+Die öffentliche Konfiguration gibt ausschließlich die zwei Anzeigeoptionen
+aus, niemals Sicherungspfade oder Zugangsdaten. Die Verwaltungsseite ist
+nur nach Anmeldung verfügbar. Teilen wird zusätzlich serverseitig geprüft;
+ein deaktivierter Schalter macht bestehende Linkschlüssel vorübergehend
+unbrauchbar, widerruft sie aber nicht dauerhaft.
+
+`BackupManager` verwendet die SQLite-Backup-API und Streaming-ZIPs mit
+`yazl`/`yauzl`. Das ZIP enthält `mapper.sqlite`, `uploads/...`, optional
+`config.json` und ein versioniertes Manifest mit Dateigrößen und SHA-256-
+Prüfsummen. Sicherungen entstehen zunächst als `.partial` und werden nach
+vollständigem Schreiben umbenannt. Nur danach greift die Aufbewahrung auf
+eindeutig benannte Mapper-Archive im konfigurierten Sicherungsordner.
+
+Der Scheduler prüft minütlich das letzte erfolgreiche Backup und das
+Intervall; erfolgreiche schreibende Mapper-API-Anfragen markieren Änderungen.
+Änderungsbackups werden um 30 Sekunden gebündelt. Die Einstellungen und der
+letzte Sicherungsstatus bleiben in SQLite erhalten. Externe Dateiänderungen
+und Umgebungsvariablen werden nicht überwacht. Sicherung und Import blockieren
+neue Schreibvorgänge; ein laufender Schreibvorgang verhindert ihren Start.
+
+Beim Import wird in ein temporäres Verzeichnis unter `DATA_DIR` gestreamt.
+ZIP-Traversal, Links, verschlüsselte Archive, unbekannte Pfade, doppelte
+Einträge und Größenüberschreitungen werden abgewiesen. Manifest, SQLite-
+Integrität, Tabellenstruktur, Fremdschlüssel, Einstellungen und Upload-
+Referenzen werden vor dem Austausch geprüft. Ein automatisches Sicherheits-
+ZIP muss erfolgreich entstehen, bevor Daten geändert werden.
+
+Die Datensätze werden in einer Transaktion in die laufende Datenbank
+übernommen; Upload-Verzeichnis und Dateikonfiguration werden umbenannt und
+ersetzt. Ein vorab geschriebenes Dateijournal und ein atomarer SQLite-
+Abschlussmarker unterscheiden beim nächsten Start zwischen abgebrochenem
+Austausch und bereits abgeschlossener Wiederherstellung. Im Fehlerfall vor
+Commit werden Transaktion und Dateitausch zurückgenommen. Nach Commit wird
+nur noch bereinigt, nicht gegen einen schon erneuerten Datenbankstand
+zurückgetauscht. Nach Import werden alle Sitzungen entfernt; für die
+Dateikonfiguration ist ein Container-Neustart nötig.
+
+Grenzen: 1 GiB ZIP-Upload, 4 GiB entpackte Daten, 20.000 ZIP-Einträge;
+kompatibles aktuelles Datenbankschema erforderlich. Archive sind nicht
+verschlüsselt. Immich-Originale und Container-Umgebungsvariablen sind kein
+Bestandteil dieser Sicherung. `BACKUP_DIR` sollte ein separat gemounteter,
+geschützter NAS-Ordner sein; weder `DATA_DIR` selbst noch `uploads` sind als
+Ziel zulässig.
 
 ## Datenmodell
 
@@ -311,6 +360,10 @@ regulären Screenshot-Endpunkt erfolgreich aufgenommen und gespeichert.
 | `POST` | `/api/albums/:albumId/report/shares` | Freigabelink erstellen; Schlüssel einmalig ausgeben |
 | `POST` | `/api/albums/:albumId/report/shares/:shareId/revoke` | Link innerhalb seines Albums widerrufen |
 | `GET` | `/api/shared-report` | Aktuellen Bericht für einen gültigen Bearer-Linkschlüssel lesen |
+| `GET`/`PUT` | `/api/settings` | Einstellungen lesen/speichern; Anmeldung erforderlich |
+| `GET`/`POST` | `/api/backups` | Backups auflisten/manuell erstellen; Anmeldung erforderlich |
+| `GET` | `/api/backups/:name` | ZIP herunterladen; Anmeldung erforderlich |
+| `POST` | `/api/backups/restore` | ZIP geprüft importieren; Anmeldung erforderlich |
 | `GET` | `/api/albums/:albumId/assets` | Fotoseite; optional nach `tourId` filtern |
 | `GET` | `/api/albums/:albumId/map-markers` | Foto-Standorte; optional nach `tourId` filtern |
 | `GET` | `/api/assets/:assetId/thumbnail` | Immich-Vorschaubild serverseitig abrufen |

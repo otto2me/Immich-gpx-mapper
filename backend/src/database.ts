@@ -116,6 +116,10 @@ export async function openDatabase(config: AppConfig) {
     }
   }
   database.exec(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS reports (
       id TEXT PRIMARY KEY,
       immich_album_id TEXT NOT NULL UNIQUE,

@@ -97,9 +97,78 @@ curl http://127.0.0.1:3000/api/health
 - Das Verzeichnis `immich-gpx-mapper-data` ist persistent und muss für den
   Container-Benutzer (UID 1000 im Image) beschreibbar sein. Es enthält
   `mapper.sqlite` sowie GPX- und Bilddateien.
+- Für Backups das zusätzliche Verzeichnis `immich-gpx-mapper-backups` als
+   `/backups` mounten und ebenfalls für UID 1000 beschreibbar machen. Der
+   Compose-Ausschnitt setzt dafür `BACKUP_DIR=/backups`. Möglichst einen
+   separaten NAS-Sicherungsordner verwenden, nicht das Upload-Verzeichnis.
 - Die Anmeldung ist ein gemeinsames Passwort, keine individuelle
   Benutzerverwaltung. Verwende ein starkes, einzigartiges Passwort und betreibe
   den Dienst nur hinter HTTPS.
+
+## Einstellungen und ZIP-Sicherungen
+
+Nach der Anmeldung öffnet das Zahnrad oben die **Einstellungen**. Ohne
+Anmeldung sind Seite und Verwaltungs-API gesperrt.
+
+- **Teilen verfügbar:** blendet die Linkverwaltung ein/aus. Ausgeschaltet
+   funktionieren auch vorhandene Freigabelinks nicht; nach erneutem Aktivieren
+   funktionieren weiterhin gültige, nicht widerrufene Links wieder. Der normale
+   offene Album-/Berichtszugriff bleibt unverändert.
+- **Komoot-Karte und Höhenprofil:** wählt lokale Bilder oder Remote-Embed als
+   Standard. Fehlen lokale Bilder, bleibt das vorhandene Remote-Embed verfügbar.
+- **Automatische Sicherungen:** aus, alle 1–365 Tage, bei Änderungen oder beides.
+   Standardmäßig ist die Automatik aus. Nach Änderungen über die Mapper-API
+   wird nach 30 Sekunden ohne weitere Schreibvorgänge gesichert. Der laufende
+   Container prüft den Zeitplan minütlich; nach einem Neustart werden überfällige
+   Intervallsicherungen nachgeholt. Extern veränderte Dateien lösen keinen
+   Dateisystem-Watcher aus.
+- **Sicherungen behalten:** 1–365 ZIPs, einschließlich Sicherheitskopien vor
+   Importen. Ältere Mapper-ZIPs werden erst nach erfolgreicher neuer Sicherung
+   entfernt. Andere Dateien im Sicherungsordner werden nicht gelöscht.
+- **Jetzt sichern** erzeugt unabhängig vom Zeitplan ein ZIP. Die Liste bietet
+   Downloads und zeigt Zeitpunkt, Größe und Fehlerstatus.
+
+Der Backup-Pfad wird über `BACKUP_DIR` festgelegt und auf der Seite angezeigt;
+ohne diesen Wert gilt `DATA_DIR/backups`. Im Container ist das ein Container-
+Pfad, keine direkt eingetragene NAS-Freigabe. Beispiel für Portainer:
+
+```yaml
+environment:
+   BACKUP_DIR: /backups
+volumes:
+   - /volume1/docker/immich-gpx-mapper/data:/data
+   - /volume1/backup/immich-gpx-mapper:/backups
+```
+
+Beide Hostpfade vorher anlegen und für Container-UID 1000 beschreibbar machen.
+Backups enthalten einen konsistenten SQLite-Snapshot mit Touren, Kommentaren,
+Berichten, Freigabelinks und Einstellungen, alle Dateien unter `uploads`
+sowie die vorhandene Datei aus `CONFIG_FILE`. Umgebungsvariablen, `.env`,
+Container-Passwort, Container-Image und Immich-Originalfotos werden nicht
+gesichert. Deshalb Portainer-Stack/Umgebungsvariablen und Immich separat sichern.
+Die ZIPs sind nicht verschlüsselt und können einen API-Key aus `config.json`
+enthalten; den NAS-Ordner entsprechend schützen.
+
+### Wiederherstellen nach Neuinstallation
+
+1. Einen kompatiblen Mapper-Stand installieren und Daten-/Backup-Ordner mounten.
+2. `APP_PASSWORD` und die benötigten Immich-Umgebungsvariablen erneut setzen.
+3. Anmelden, **Einstellungen → Sicherung importieren** öffnen und das ZIP wählen.
+4. `WIEDERHERSTELLEN` eingeben und den Austausch ausdrücklich bestätigen.
+5. Nach erfolgreichem Import den Container neu starten und erneut anmelden.
+    Eine wiederhergestellte Dateikonfiguration wird erst beim Neustart geladen;
+    gesetzte Umgebungsvariablen haben weiterhin Vorrang.
+
+Das ZIP wird vor dem Austausch auf Format, Dateipfade, Größen, Prüfsummen,
+Datenbankschema und verknüpfte Uploads geprüft. Es muss zur aktuellen
+Programmversion passen. Maximale ZIP-Größe: 1 GiB; entpackt: 4 GiB und
+20.000 Einträge. Vor einem gültigen Import wird der aktuelle Stand zusätzlich
+als `mapper-safety-...zip` gesichert. Ohne diese Sicherheitskopie wird nicht
+importiert. Während des Austauschs sind API-Zugriffe kurz gesperrt; danach
+werden alle Mapper-Sitzungen ungültig. Ein Journal unterstützt die Bereinigung
+oder Rücknahme unterbrochener Dateitausche beim nächsten Start.
+
+Backups ersetzen keine zusätzliche Kopie auf einem anderen Datenträger.
 
 ## Nutzung
 
