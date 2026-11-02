@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { chromium } from "playwright-core";
 
-const screenshotTimeoutMs = 30_000;
+const screenshotTimeoutMs = 60_000;
 const maxScreenshotBytes = 8 * 1024 * 1024;
 const allowedResourceHosts = new Set([
   "www.komoot.com",
@@ -93,7 +93,14 @@ export async function captureKomootScreenshots(embedUrl: string) {
       ...process.env,
       HOME: process.env.DATA_DIR ?? "/data"
     },
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--use-gl=angle",
+      "--use-angle=swiftshader",
+      "--enable-unsafe-swiftshader"
+    ]
   });
 
   try {
@@ -119,23 +126,16 @@ export async function captureKomootScreenshots(embedUrl: string) {
       }
     });
 
-    await page.setContent("<!doctype html><html><head><meta charset=\"utf-8\"></head><body></body></html>");
-    await page.locator("body").evaluate((body, url) => {
-      const iframe = document.createElement("iframe");
-      iframe.id = "komoot-embed";
-      iframe.src = url;
-      iframe.title = "Komoot-Karte und Höhenprofil";
-      iframe.allow = "fullscreen";
-      iframe.referrerPolicy = "strict-origin-when-cross-origin";
-      iframe.width = "1280";
-      iframe.height = "1000";
-      iframe.style.width = "1280px";
-      iframe.style.height = "1000px";
-      iframe.style.border = "0";
-      body.append(iframe);
-    }, embedUrl);
+    await page.goto(embedUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: screenshotTimeoutMs
+    });
 
-    const mapCanvas = await waitForVisibleInAnyFrame(page, "canvas.maplibregl-canvas", blockedHosts);
+    const mapCanvas = await waitForVisibleInAnyFrame(
+      page,
+      "canvas.maplibregl-canvas:not(.maplibregl-map canvas)",
+      blockedHosts
+    );
     const elevationProfile = await waitForVisibleInAnyFrame(page, "[data-activity-profile-card]", blockedHosts);
     await page.waitForTimeout(1200);
 

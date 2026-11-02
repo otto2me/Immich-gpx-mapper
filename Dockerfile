@@ -14,7 +14,7 @@ RUN npm run build
 RUN npm prune --omit=dev
 
 FROM node:26-alpine AS runtime
-RUN apk add --no-cache chromium nss freetype harfbuzz ca-certificates ttf-freefont \
+RUN apk add --no-cache chromium chromium-swiftshader nss freetype harfbuzz ca-certificates ttf-freefont \
     && ln -s "$(command -v chromium-browser || command -v chromium)" /usr/local/bin/komoot-chromium
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
