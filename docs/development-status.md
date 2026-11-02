@@ -10,9 +10,41 @@ App-Passwort geschützt.
 
 ## Aktueller Auftrag
 
-Karte und Höhenprofil des offiziellen Komoot-Embeds können als lokale
-PNG-Screenshots im Docker-Datenvolume gespeichert und in der Touransicht
-anstelle des Embeds angezeigt werden.
+Die Komoot-Screenshot-Erstellung und das Abmelden wurden korrigiert und lokal
+geprüft. Als nächste Erweiterungen werden mehrere Touren je Album mit
+Datumsnavigation sowie ein bebilderter Reisebericht diskutiert. Diese
+Erweiterungen sind noch nicht umgesetzt; Reihenfolge und Details sind offen.
+
+## Aktualisierung vom 02.11.2026
+
+- Chromium öffnet den offiziellen Komoot-Embed direkt. Ein künstliches
+  `about:blank`-Elternfenster führte zu einem verweigerten `localStorage`-Zugriff.
+- Das Alpine-Runtime-Image installiert zusätzlich `chromium-swiftshader`.
+  Explizite SwiftShader-Startoptionen ermöglichen WebGL ohne Container-GPU.
+- Komoot zeigt zunächst ein vorläufiges Relief-Canvas und ersetzt es später
+  durch die fertige Karte. Die Aufnahme wartet auf
+  `canvas.maplibregl-canvas:not(.maplibregl-map canvas)` und das Höhenprofil.
+  Das Zeitlimit je Warteoperation beträgt 60 Sekunden. Globale
+  `networkidle`-Wartebedingungen und ein Vorladen der normalen Tourseite sind
+  nicht erforderlich und führten zu unnötigen Zeitüberschreitungen.
+- Ein zusätzlicher Komoot-API-Aufruf kann ohne Anmeldung HTTP 403 liefern,
+  obwohl der Freigabelink die vollständige Karte zeigt. Diese Antwort allein
+  belegt kein Freigabeproblem.
+- Der vollständige Docker-Build war erfolgreich. Im frisch gebauten,
+  isolierten Container lieferte der Screenshot-Endpunkt HTTP 201 nach rund
+  elf Sekunden und speicherte Karte und Höhenprofil. Die Kartenaufnahme wurde
+  auf sichtbare Strecke und Beschriftungen geprüft. Es wurden keine
+  produktiven Immich-Daten verändert.
+- Der Frontend-Request-Helper setzt `application/json` nur bei einem
+  vorhandenen, nicht leeren Body und nicht bei `FormData`. Der bisherige
+  bodylose Logout mit JSON-Inhaltstyp wurde von Fastify mit
+  `FST_ERR_CTP_EMPTY_JSON_BODY` abgewiesen.
+- Regressionstest mit dem tatsächlichen API-Client und Fastify: Logout HTTP
+  200, Sitzung einschließlich altem Session-Cookie ungültig, JSON-Login und
+  Multipart-Upload weiterhin korrekt. Frontend-Build und Editor-Diagnosen
+  waren erfolgreich.
+- Die Prüfungen bestätigen den lokalen Quellstand. Veröffentlichung und
+  Aktualisierung eines Portainer-Containers müssen separat erfolgen.
 
 ## Umsetzung
 
@@ -137,19 +169,19 @@ anstelle des Embeds angezeigt werden.
   Tourlink im Browser geöffnet und im Album angezeigt.
 - Der Screenshot-Endpunkt wurde mit einem isolierten Backend und temporärem
   Datenverzeichnis erfolgreich durchgetestet.
-- Ein Container-Build war nicht möglich, da Podman in der Umgebung nicht
-  installiert ist; der reguläre Frontend-/Backend-Build war erfolgreich.
+- Der zunächst mangels Container-Runtime ausstehende Container-Test wurde
+  inzwischen mit Docker Desktop erfolgreich nachgeholt; siehe Aktualisierung
+  vom 02.11.2026.
 
 ## Ergebnis
 
-Die commit-basierte Footer-Version ist implementiert und geprüft. Bei lokalen
-Builds wird sie direkt aus Git ermittelt. Compose übergibt den Git-Stand beim
-Docker-Build als `APP_VERSION`. Der lokale Testserver wurde nur zur Prüfung
-gestartet.
+Die commit-basierte Footer-Version, lokale Komoot-Screenshots und die
+Logout-Korrektur sind implementiert und geprüft. Mehrere Touren pro Album,
+Datumsnavigation und Reiseberichte sind noch nicht implementiert.
 
 ## Noch offene Integrationsprüfungen
 
-- Mit einer realen Immich-Instanz Alben, Albumdetails und Vorschaubilder prüfen.
-- Den Container-Build in einer Umgebung mit Podman oder Docker prüfen.
+- Den jeweils veröffentlichten Stand nach dem Image-Update in Portainer
+  prüfen; lokale Tests ersetzen keine Prüfung des tatsächlich laufenden Images.
 - Für `@fastify/static` eine kompatible Aktualisierung oder einen sicheren
   Dependency-Override für die `glob`/`minimatch`-Advisories verifizieren.

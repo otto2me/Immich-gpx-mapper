@@ -100,6 +100,51 @@ CREATE TABLE comments (
 Immich-Album- und Asset-Metadaten werden live über die Immich-API gelesen und
 nicht in der Mapper-Datenbank dupliziert.
 
+### Diskussionsstand: Mehrtag-Alben und Reiseberichte
+
+Noch nicht umgesetzt. Fachlich bestätigt sind mehrere Touren je Album, aber
+höchstens eine Tour je Kalendertag innerhalb dieses Albums. Mehrere Touren am
+selben Tag werden nicht benötigt. Urlaubstage ohne Tour bleiben im Album
+darstellbar. Jede Tour behält eine eigene Identität; Datum und Tabs dienen
+der Zuordnung und Navigation.
+
+Die aktuelle eindeutige Album-Zuordnung in `tours` müsste dafür migriert
+werden. Bestehende Touren, Kommentare und Dateiverweise müssen erhalten
+bleiben. Eine Tour könnte Titel, Datum, Beginn und Ende, GPX-Datei sowie
+Komoot-Link enthalten.
+
+Bestätigt ist eine zeitbasierte Fotozuordnung. Der bearbeitbare
+Tour-Zeitraum bestimmt anhand des Aufnahmezeitpunkts, welche Fotos aus dem
+zugehörigen Immich-Album in der Tour erscheinen. Beispielsweise würden bei
+09:00 bis 15:30 Uhr die übrigen Tagesfotos nicht zur Tour gehören, aber im
+Album erhalten bleiben. Standardmäßig ist der ganze ausgewählte Kalendertag
+in der gewählten Zeitzone eingeschlossen; Beginn und Ende können bei Bedarf
+über Uhrzeiten eingegrenzt werden. Eine Übernahme vorhandener GPX-Zeitangaben
+als Vorschlag bleibt eine noch nicht beschlossene Zusatzoption und darf
+manuell gewählte Zeiten nicht ungefragt überschreiben.
+
+Die gewählte Zeitzone muss für Tour-Zeitraum und Fotozeitpunkt konsistent
+sein. Fehlende Zeitangaben, manuelle Korrekturen, Zeiträume über Mitternacht
+und die genaue Behandlung der Intervallgrenzen sind vor der Umsetzung zu
+klären. Eine Tourauswahl muss Galerie und Kartenmarker gemeinsam filtern;
+der Filter muss vor der Fotopaginierung greifen, nicht nur auf der gerade
+geladenen Seite. Immich-Assets werden dabei nicht verändert.
+
+Ein Reisebericht könnte auf Albumebene Texte, ausgewählte Immich-Fotos und
+Tourverweise zu Kapiteln verbinden. Fotos würden referenziert, nicht in neue
+Immich-Alben verschoben oder dupliziert. Vorschlag für die Reihenfolge:
+zunächst das Mehrtouren-Modell mit Datumsnavigation, anschließend der darauf
+aufbauende Bericht.
+
+Bestätigte Anforderung für das Teilen: Ein Reisebericht soll ohne Anmeldung
+über einen widerrufbaren Freigabelink lesbar sein. Der Link berechtigt nur
+zum Lesen des freigegebenen Berichts und seiner ausdrücklich ausgewählten
+Medien, nicht zum übrigen Album oder zu Schreibzugriffen. Bericht und
+Medienabrufe benötigen dieselbe serverseitige Freigabeprüfung; nach dem
+Widerruf sind weitere Abrufe zu verweigern. Bereits heruntergeladene Inhalte
+lassen sich dadurch nicht zurückholen. Der bestehende gemeinsame API-Key
+ist keine Zugriffskontrolle für einzelne Reiseberichte.
+
 ## Benutzer und Immich-Berechtigungen
 
 Der aktuelle Betrieb verwendet einen serverseitigen `IMMICH_API_KEY`. Dieser
@@ -144,6 +189,15 @@ enthält Chromium dafür. Die UI kann zwischen dem Embed und den lokalen Bildern
 wechseln; das lokale Bild ist eine Momentaufnahme, keine live aktualisierte
 Komoot-Ansicht.
 
+Chromium navigiert direkt zum Embed, damit Komoot auf normalen Web-Speicher
+zugreifen kann. Im GPU-losen Alpine-Container ermöglichen das Paket
+`chromium-swiftshader` und explizite Software-WebGL-Startoptionen die Karte.
+Die Aufnahme wartet bis zu 60 Sekunden je Warteoperation auf das endgültige
+Komoot-Karten-Canvas statt auf das zuerst sichtbare Relief-Canvas. Sie hängt
+nicht von globaler Netzwerkinaktivität ab; die Ressourcen-Allowlist bleibt
+aktiv. Karte und Höhenprofil wurden im frisch gebauten Docker-Image über den
+regulären Screenshot-Endpunkt erfolgreich aufgenommen und gespeichert.
+
 ## API-Skizze
 
 | Methode | Pfad | Zweck |
@@ -169,6 +223,11 @@ API-Routen sind durch ein gemeinsames App-Passwort geschützt. Eine erfolgreiche
 Anmeldung setzt ein HttpOnly-/SameSite-Session-Cookie; Sitzungen laufen nach
 12 Stunden ab oder werden beim Neustart des Containers verworfen. Die Anwendung
 hat keine individuelle Benutzerverwaltung.
+
+Bodylose Anfragen wie `POST /api/auth/logout` senden keinen JSON-Inhaltstyp.
+Der Frontend-Client setzt `application/json` nur bei einem vorhandenen,
+nicht leeren JSON-Body; bei `FormData` bestimmt der Browser den
+Multipart-Inhaltstyp einschließlich Boundary.
 
 Die Tourart ist `hike` (Wanderung) oder `bike` (Fahrradtour). Vorhandene
 SQLite-Datenbanken werden beim Start migriert; bestehende Touren erhalten den
