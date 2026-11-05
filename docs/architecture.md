@@ -29,6 +29,98 @@ Der Synology Reverse Proxy terminiert HTTPS und leitet per HTTP an den Mapper
 weiter. Ein eigener Nginx- oder TLS-Container ist nicht nötig. Der veröffentlichte
 Mapper-Port sollte auf `127.0.0.1` beschränkt sein.
 
+## Beschlossenes Zielmodell: Benutzer und Albumrechte (05.11.2026)
+
+Status: beschlossen, noch nicht umgesetzt. Dieser Abschnitt ersetzt für die
+geplante Mehrbenutzerversion die bisherige Entscheidung zum offenen Lesen
+und zum gemeinsamen App-Passwort. Die nachfolgenden Beschreibungen und
+SQL-Beispiele dokumentieren weiterhin den bisherigen Implementierungsstand.
+
+### Konten und Immich-Verbindung
+
+- Eigene lokale Mapper-Konten statt eines gemeinsamen Benutzerzugangs.
+  Ein Import von Immich-Nutzern ist nicht erforderlich und nicht Teil
+  dieses Umsetzungsschritts. Gemeinsame Anmeldung über OIDC ist ebenfalls
+  nicht Teil dieses Schritts.
+- Konten besitzen eine eigene Identität; Passwörter werden sicher gehasht.
+  Sitzungen identifizieren den angemeldeten Benutzer.
+- Rollen sind Administrator und Benutzer. Kontoverwaltung, globale
+  Konfiguration und Sicherung/Wiederherstellung sind Administratoraufgaben;
+  persönliche Einstellungen sind davon getrennt.
+- Jeder Benutzer hinterlegt seinen eigenen Immich-API-Key in seinen
+  Einstellungen. Der Key bleibt serverseitig, wird verschlüsselt gespeichert
+  und nach dem Speichern nicht vollständig angezeigt oder protokolliert.
+  Die Immich-Serveradresse bleibt zunächst gemeinsame Instanzkonfiguration.
+- Eigene Immich-Alben und Fotos werden mit dem persönlichen Key und dessen
+  tatsächlichen Immich-Berechtigungen gelesen. Mapper-Konten erhalten dadurch
+  keine zusätzlichen Berechtigungen innerhalb von Immich.
+
+### Album als Berechtigungsgrenze
+
+Ein verwaltetes Mapper-Album besitzt einen lokalen Eigentümer. Touren,
+Kommentare, GPX-Dateien, Kartenbilder, Albumfotos und Reiseberichte/Blogs
+gehören zu diesem Album und erben zunächst dessen Leserechte.
+
+| Album-Sichtbarkeit | Leserecht |
+| --- | --- |
+| Privat (Standard für neue Alben) | Nur der Eigentümer |
+| Für Benutzer freigegeben | Eigentümer und ausdrücklich ausgewählte lokale Konten |
+| Öffentlich | Ohne Anmeldung über die normale Album-Webadresse |
+
+Nur der Eigentümer darf Albuminhalte bearbeiten, löschen, Benutzerfreigaben
+verwalten oder das Album veröffentlichen. Benutzerfreigaben sind zunächst
+reine Lesefreigaben; gemeinsames Bearbeiten ist nicht Teil dieses Schritts.
+Touren erhalten zunächst keine separaten Sichtbarkeitsschalter.
+Ein Bericht darf ausdrücklich privat bleiben, obwohl das Album für Benutzer
+freigegeben oder öffentlich ist. Ohne diese Einschränkung erbt er die
+Album-Leserechte. Öffentlich bedeutet ohne Login und ohne Freigabetoken;
+eine schwer erratbare Webadresse ersetzt keinen Zugriffsschutz.
+
+### Blog-Freigabelinks und Bildzugriff
+
+- Bestehende Blog-Freigabelinks bleiben als zusätzliche, gezielte Lesefreigabe
+  erhalten, auch bei einem privaten Album oder einem privat gehaltenen Blog.
+  Sie sind weiterhin widerrufbar und optional zeitlich begrenzt.
+- Ein gültiger Link erlaubt nur den aktuellen gespeicherten Bericht und die
+  für seine Darstellung erforderlichen, zugehörigen Ressourcen. Er öffnet
+  weder die Albumgalerie noch andere Touren, Blogs oder beliebige Asset-IDs.
+  Ein Tourverweis im Blog gewährt keinen allgemeinen Zugriff auf die Tour;
+  eingebettete Ressourcen müssen auf die Berichtsdarstellung begrenzt sein.
+- Widerruf beendet den Zugriff über diesen Link. Unabhängig davon können
+  Albumrechte oder eine öffentliche Sichtbarkeit weiterhin Lesen erlauben.
+  Der globale Schalter für Teilen sperrt Blog-Freigabelinks weiterhin; er
+  ersetzt nicht die ausdrückliche Album-Sichtbarkeit.
+- Mapper-Freigaben und Immich-Freigaben bleiben getrennt. Bei einer
+  Mapper-Freigabe beschafft das Backend erlaubte Bilder mit dem Key des
+  Album-Eigentümers, ohne diesen an Besucher weiterzugeben. Empfänger brauchen
+  dafür keine eigene Immich-Freigabe und keinen eigenen Key für dieses Album.
+- Öffentliches Veröffentlichen kann in Immich private Fotos im Mapper
+  öffentlich zugänglich machen. Dies erfordert eine ausdrückliche Bestätigung
+  durch den Eigentümer; Immich-Rechte werden dabei nicht verändert.
+
+### Durchsetzung, Migration und Abnahme
+
+Alle Rechte werden serverseitig geprüft, einschließlich lesender GET-/HEAD-
+Anfragen, Albumlisten, direkter Album-/Tour-/Berichts-URLs, Kartenmarker,
+Kommentare, Bild-Proxys, Downloads und lokaler Upload-Dateien. Ausgeblendete
+Bedienelemente oder bekannte IDs sind kein Schutz. Die allgemeinen Medien-
+routen dürfen private Inhalte nicht an den Berechtigungsprüfungen vorbei
+ausliefern. Rechteänderungen müssen auch bei erneuten Ressourcenabrufen greifen.
+
+Bestehende Mapper-Inhalte und der bisherige globale Immich-Key werden einem
+initialen Administratorkonto zugeordnet. IDs, Touren, Kommentare, Upload-
+Referenzen und bestehende Blog-Freigabelinks sollen erhalten bleiben. Vor der
+Migration ist eine vollständige Sicherung erforderlich. Noch festzulegen
+sind der sichere Erstzugang, die Sichtbarkeit bestehender Alben sowie die
+Verwaltung des Verschlüsselungsschlüssels einschließlich Backup/Restore.
+Eine automatische Veröffentlichung alter Inhalte ist nicht beschlossen.
+
+Die Abnahme muss mindestens zwei lokale Konten mit getrennten Keys, private
+Album- und Dateizugriffe, reine Benutzer-Lesefreigaben samt Entzug,
+öffentliche Alben ohne Login, private Berichte in öffentlichen Alben,
+begrenzte Blog-Links samt Ablauf/Widerruf sowie Migration und Sicherungs-
+Wiederherstellung abdecken. Direkte Fremd-IDs dürfen keinen Zugriff eröffnen.
+
 ## Komponenten
 
 ### Fastify-Backend
@@ -249,9 +341,10 @@ Mapper-Besucher lesbar, sowohl regulär als auch über einen aktiven Freigabelin
 Der Berichts-Deep-Link lautet
 `/?album=<Album-ID>&view=report`.
 
-### Freigabelinks im offenen Lesemodus
+### Freigabelinks im bisherigen offenen Lesemodus
 
-Bestätigte Entscheidung: Das offene Lesen bleibt bestehen. Ein Widerruf
+Bisherige Entscheidung, durch das Zielmodell vom 05.11.2026 abgelöst:
+Das offene Lesen bleibt im aktuellen Implementierungsstand bestehen. Ein Widerruf
 deaktiviert den konkreten Freigabelink, nicht den normalen Album-/Berichtszugriff.
 Die bisherigen allgemeinen Album- und Medien-Leserouten bleiben unverändert.
 Dies ist keine tokenbasierte Zugriffssperre für sämtliche Berichtsinhalte.

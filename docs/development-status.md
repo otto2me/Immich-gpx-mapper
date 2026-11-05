@@ -10,6 +10,45 @@ App-Passwort geschützt.
 
 ## Aktueller Auftrag
 
+Am 05.11.2026 wurde der nächste Schritt beschlossen: lokale Benutzerkonten
+mit persönlichen Immich-API-Keys und Albumrechten. Das verbindliche Zielmodell
+steht in [Architektur: Benutzer und Albumrechte](architecture.md#beschlossenes-zielmodell-benutzer-und-albumrechte-05112026).
+Diese Erweiterung ist noch nicht umgesetzt; in diesem Schritt wurden nur
+die Entscheidungen dokumentiert.
+
+- Kein Immich-Nutzerimport nötig; eigene Mapper-Konten mit Administrator-
+  und Benutzerrolle sowie getrennten persönlichen und globalen Einstellungen.
+- Album als Berechtigungsgrenze für Fotos, Touren, Kommentare, GPX,
+  Kartenbilder und Blogs: privat, für ausgewählte lokale Benutzer lesbar
+  oder ausdrücklich öffentlich ohne Login über die Album-Webadresse.
+- Neue Alben standardmäßig privat; Änderungen und Freigaben durch den
+  Eigentümer. Benutzerfreigaben zunächst nur zum Lesen. Ein Blog kann
+  innerhalb eines freigegebenen oder öffentlichen Albums privat bleiben.
+- Persönliche Keys bleiben verschlüsselt auf dem Server. Mapper-Freigaben
+  liefern nur erlaubte Inhalte über den Key des Album-Eigentümers und
+  ändern keine Immich-Rechte. Veröffentlichung privater Immich-Bilder
+  erfordert eine ausdrückliche Bestätigung.
+- Blog-Freigabelinks bleiben erhalten, widerrufbar und optional befristet;
+  sie erlauben nur den Bericht und seine notwendigen Ressourcen, nicht
+  pauschal Album oder Touren. Der globale Teile-Schalter sperrt diese Links
+  weiterhin, ist aber kein Ersatz für Albumrechte.
+- Lesende API-Aufrufe und sämtliche Medien-/Dateizugriffe benötigen ebenfalls
+  serverseitige Rechteprüfungen. Die bisherige GET-Ausnahme ist dafür
+  nicht ausreichend.
+- Bestehende Inhalte und globaler Key werden einem initialen Administrator
+  zugeordnet; IDs und Blog-Links sollen erhalten bleiben. Erstzugang,
+  Sichtbarkeit alter Alben und Schlüsselverwaltung mit Backup/Restore
+  müssen vor der jeweiligen Implementierung festgelegt werden.
+- Geplante Prüfungen: Trennung zweier Konten/Keys, direkte Fremd-IDs,
+  Freigabe und Entzug, öffentliche Alben, private Blogs, begrenzte Links,
+  Migration und Sicherungs-Wiederherstellung.
+
+## Bisheriger Implementierungsstand
+
+Die folgenden Abschnitte beschreiben die bereits umgesetzte Version und
+historische Prüfungen. Aussagen zum bewusst offenen Lesen gelten für diesen
+bisherigen Stand, nicht als Vorgabe für die geplante Mehrbenutzerversion.
+
 Mehrere Touren je Album mit Datumsnavigation, optionalen Zeitfenstern und
 gemeinsamer Foto-/Kartenfilterung sind umgesetzt und lokal geprüft.
 Der Reisebericht mit Kapitel-Editor und Lesevorschau ist ebenfalls umgesetzt
