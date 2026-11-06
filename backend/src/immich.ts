@@ -98,6 +98,19 @@ export async function registerImmichRoutes(
     return getImmichApiKey(database, album.owner_id, encryptionKey);
   }
 
+  async function registerAlbumForUser(albumId: string, userId: string) {
+    const apiKey = getImmichApiKey(database, userId, encryptionKey);
+    const response = await immichFetch(`albums/${encodeURIComponent(albumId)}`, apiKey);
+    const metadata = await response.json() as ImmichAlbum;
+    if (metadata.id !== albumId) {
+      throw Object.assign(new Error("Album nicht gefunden"), { statusCode: 404 });
+    }
+    ensureAlbum(database, metadata.id, userId, {
+      id: metadata.id, albumName: metadata.albumName, description: metadata.description,
+      albumThumbnailAssetId: metadata.albumThumbnailAssetId, assetCount: metadata.assetCount
+    });
+  }
+
   async function albumContainsAssets(albumId: string, assetIds: string[], providedKey?: string) {
     const apiKey = providedKey ?? ownerApiKey(albumId);
     const remaining = new Set(assetIds);
@@ -158,14 +171,7 @@ export async function registerImmichRoutes(
       const album = albumRow(database, request.params.albumId);
       const user = getSession(request);
       if (!album && user) {
-        const key = getImmichApiKey(database, user.id, encryptionKey);
-        const response = await immichFetch(`albums/${encodeURIComponent(request.params.albumId)}`, key);
-        const metadata = await response.json() as ImmichAlbum;
-        if (metadata.id !== request.params.albumId) return reply.code(404).send({ message: "Album nicht gefunden" });
-        ensureAlbum(database, metadata.id, user.id, {
-          id: metadata.id, albumName: metadata.albumName, description: metadata.description,
-          albumThumbnailAssetId: metadata.albumThumbnailAssetId, assetCount: metadata.assetCount
-        });
+        await registerAlbumForUser(request.params.albumId, user.id);
       }
       const { album: readableAlbum } = requireAlbumRead(database, request, request.params.albumId);
       const response = await immichFetch(
@@ -241,6 +247,10 @@ export async function registerImmichRoutes(
     async (request, reply) => {
       const albumId = request.query.albumId;
       if (!albumId) return reply.code(400).send({ message: "Album-ID fehlt" });
+      const user = getSession(request);
+      if (!albumRow(database, albumId) && user) {
+        await registerAlbumForUser(albumId, user.id);
+      }
       const { album } = requireAlbumRead(database, request, albumId);
       const apiKey = getImmichApiKey(database, album.owner_id, encryptionKey);
       if (!(await albumContainsAssets(albumId, [request.params.assetId], apiKey))) {

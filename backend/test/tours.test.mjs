@@ -147,3 +147,49 @@ test("tour APIs isolate albums, files and comments and filter before photo pagin
     await rm(dataDir, { recursive: true, force: true });
   }
 });
+
+test("authenticated thumbnail requests register an accessible Immich album, anonymous requests cannot", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "mapper-thumbnail-album-"));
+  const config = testConfig(dataDir);
+  const database = await openDatabase(config);
+  const app = Fastify();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const path = new URL(String(url)).pathname;
+    if (path.endsWith("/api/albums/new-album")) {
+      return Response.json({
+        id: "new-album", albumName: "New album",
+        albumThumbnailAssetId: "new-photo", assetCount: 1
+      });
+    }
+    if (path.endsWith("/api/search/metadata")) {
+      return Response.json({ assets: { items: [{ id: "new-photo" }], total: 1, nextPage: null } });
+    }
+    if (path.endsWith("/api/assets/new-photo/thumbnail")) {
+      return new Response("thumbnail", { headers: { "content-type": "image/jpeg" } });
+    }
+    throw new Error(`Unexpected Immich request: ${path}`);
+  };
+  try {
+    const { admin, encryptionKey } = await registerTestAuth(app, database, config);
+    await registerImmichRoutes(app, config, database, encryptionKey);
+    const url = "/api/assets/new-photo/thumbnail?albumId=new-album";
+    assert.equal((await app.inject({ url })).statusCode, 404);
+    assert.equal(database.prepare("SELECT count(*) AS count FROM albums WHERE immich_album_id = ?")
+      .get("new-album").count, 0);
+
+    const headers = await login(app);
+    const response = await app.inject({ url, headers });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body, "thumbnail");
+    const album = database.prepare("SELECT owner_id, visibility FROM albums WHERE immich_album_id = ?")
+      .get("new-album");
+    assert.equal(album.owner_id, admin.id);
+    assert.equal(album.visibility, "private");
+  } finally {
+    globalThis.fetch = originalFetch;
+    await app.close();
+    database.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
