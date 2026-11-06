@@ -516,8 +516,8 @@
     }
   }
 
-  function thumbnail(assetId: string) {
-    return `/api/assets/${encodeURIComponent(assetId)}/thumbnail?${new URLSearchParams({ albumId: selectedAlbum?.id ?? "" })}`;
+  function thumbnail(assetId: string, albumId: string) {
+    return `/api/assets/${encodeURIComponent(assetId)}/thumbnail?${new URLSearchParams({ albumId })}`;
   }
 
   function assetTitle(asset: Asset) {
@@ -742,12 +742,12 @@
                   rel="noreferrer"
                   title="In Immich öffnen"
                 >
-                  <img src={thumbnail(asset.id)} alt={assetTitle(asset)} loading="lazy" />
+                  <img src={thumbnail(asset.id, selectedAlbum.id)} alt={assetTitle(asset)} loading="lazy" />
                   <span>{assetTitle(asset)}</span>
                 </a>
               {:else}
                 <div class="album-photo">
-                  <img src={thumbnail(asset.id)} alt={assetTitle(asset)} loading="lazy" />
+                  <img src={thumbnail(asset.id, selectedAlbum.id)} alt={assetTitle(asset)} loading="lazy" />
                   <span>{assetTitle(asset)}</span>
                 </div>
               {/if}
@@ -1193,7 +1193,7 @@
             <button class="album-card" onclick={() => openAlbum(album)}>
               <div class="album-cover">
                 {#if album.albumThumbnailAssetId}
-                  <img src={thumbnail(album.albumThumbnailAssetId)} alt="" loading="lazy" />
+                  <img src={thumbnail(album.albumThumbnailAssetId, album.id)} alt="" loading="lazy" />
                 {:else}
                   <span class="cover-placeholder">⌖</span>
                 {/if}

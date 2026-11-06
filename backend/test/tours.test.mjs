@@ -77,6 +77,9 @@ test("tour APIs isolate albums, files and comments and filter before photo pagin
     id: `asset-${index}`, fileCreatedAt: index % 20 === 0 ? "2026-08-12T10:00:00Z" : "2026-08-13T10:00:00Z"
   }));
   globalThis.fetch = async (url, init) => {
+    if (String(url).includes("/assets/asset-0/thumbnail")) {
+      return new Response("thumbnail", { headers: { "content-type": "image/jpeg" } });
+    }
     if (String(url).endsWith("/map-markers")) {
       return Response.json(assets.map((asset) => ({ id: asset.id, lat: 48, lon: 11 })));
     }
@@ -95,6 +98,10 @@ test("tour APIs isolate albums, files and comments and filter before photo pagin
     assert.equal((await app.inject({ url: "/api/assets/asset-0/thumbnail?size=invalid" })).statusCode, 400);
     assert.equal((await app.inject({ method: "POST", url: "/api/albums/album/tours", payload: { date: "2026-08-12" } })).statusCode, 401);
     const headers = await login(app);
+    const thumbnail = await app.inject({ url: "/api/assets/asset-0/thumbnail?albumId=album", headers });
+    assert.equal(thumbnail.statusCode, 200);
+    assert.equal(thumbnail.headers["content-type"], "image/jpeg");
+    assert.equal(thumbnail.body, "thumbnail");
     const create = async (date) => app.inject({ method: "POST", url: "/api/albums/album/tours", headers, payload: { date, timeZone: "Europe/Berlin", title: date } });
     const first = await create("2026-08-12");
     assert.equal(first.statusCode, 201);
