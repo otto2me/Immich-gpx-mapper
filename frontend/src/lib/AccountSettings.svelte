@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { api, type Account, type AuthUser } from "./api.js";
+  import { api, type Account, type AdminAlbum, type AuthUser } from "./api.js";
 
   let { user, onImmichKeySaved }: { user: AuthUser; onImmichKeySaved: () => void } = $props();
   let keyConfigured = $state(false);
@@ -8,6 +8,8 @@
   let currentPassword = $state("");
   let newPassword = $state("");
   let accounts = $state<Account[]>([]);
+  let albums = $state<AdminAlbum[]>([]);
+  let albumOwners = $state<Record<string, string>>({});
   let accountPasswords = $state<Record<string, string>>({});
   let accountRoles = $state<Record<string, "admin" | "user">>({});
   let username = $state("");
@@ -29,9 +31,10 @@
       const settings = await api.userSettings();
       keyConfigured = settings.immichApiKeyConfigured;
       if (user.role === "admin") {
-        accounts = await api.users();
+        [accounts, albums] = await Promise.all([api.users(), api.adminAlbums()]);
         accountRoles = Object.fromEntries(accounts.map((account) => [account.id, account.role]));
         accountPasswords = {};
+        albumOwners = Object.fromEntries(albums.map((album) => [album.id, album.ownerId]));
       }
     } catch (reason) {
       error = message(reason);
@@ -146,6 +149,27 @@
     } finally {
       busy = false;
     }
+
+    async function transferAlbum(album: AdminAlbum) {
+      const newOwnerId = albumOwners[album.id];
+      if (!newOwnerId || newOwnerId === album.ownerId) return;
+      const newOwner = accounts.find((account) => account.id === newOwnerId);
+      if (!confirm(`„${album.metadata.albumName ?? album.id}“ an ${newOwner?.username ?? "das ausgewählte Konto"} übertragen?\n\nDanach kann nur der neue Eigentümer das Album bearbeiten und dessen Immich-Key wird für Albumzugriffe verwendet.`)) return;
+      busy = true;
+      error = "";
+      notice = "";
+      try {
+        await api.transferAlbum(album.id, newOwnerId);
+        albums = await api.adminAlbums();
+        albumOwners = Object.fromEntries(albums.map((item) => [item.id, item.ownerId]));
+        onImmichKeySaved();
+        notice = `Eigentum von „${album.metadata.albumName ?? album.id}“ übertragen.`;
+      } catch (reason) {
+        error = message(reason);
+      } finally {
+        busy = false;
+      }
+    }
   }
 </script>
 
@@ -196,6 +220,29 @@
         {/each}
       </ul>
     </section>
+    <section class="accounts album-ownership">
+      <h2>Album-Eigentum übertragen</h2>
+      <p class="muted">Nur Konten mit hinterlegtem Immich-Key können Eigentümer werden. Die Sichtbarkeit und vorhandenen Lesefreigaben bleiben erhalten.</p>
+      {#if albums.length}
+        <ul>
+          {#each albums as album (album.id)}
+            <li>
+              <div><strong>{album.metadata.albumName ?? album.id}</strong><small>Aktuell: {album.ownerName} · {album.visibility}</small></div>
+              <label>Neuer Eigentümer
+                <select bind:value={albumOwners[album.id]} disabled={busy}>
+                  {#each accounts.filter((account) => account.immichApiKeyConfigured || account.id === album.ownerId) as account (account.id)}
+                    <option value={account.id}>{account.username}</option>
+                  {/each}
+                </select>
+              </label>
+              <button type="button" disabled={busy || !albumOwners[album.id] || albumOwners[album.id] === album.ownerId} onclick={() => transferAlbum(album)}>Eigentum übertragen</button>
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <p>Es sind noch keine Mapper-Alben registriert.</p>
+      {/if}
+    </section>
   {/if}
 </section>
 
@@ -216,6 +263,7 @@
   small { color: #637168; font-size: 14px; }
   .accounts ul { display: grid; gap: 16px; list-style: none; padding: 0; }
   .accounts li { display: grid; grid-template-columns: minmax(100px, 1fr) repeat(3, minmax(140px, 1fr)); gap: 10px; align-items: end; padding: 14px; border: 1px solid #dce3db; border-radius: 7px; }
+  .album-ownership li { grid-template-columns: minmax(150px, 1fr) minmax(180px, 1fr) auto; }
   .accounts li > div { display: grid; gap: 5px; align-self: center; }
   .error { color: #962e2e; background: #fff0ed; padding: 12px; border-radius: 6px; }
   .notice { color: #256d43; }

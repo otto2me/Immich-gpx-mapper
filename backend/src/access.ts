@@ -104,8 +104,11 @@ export function registerAccessRoutes(app: FastifyInstance, database: DatabaseSyn
     return database.prepare("SELECT id, username FROM users ORDER BY username COLLATE NOCASE").all();
   });
   app.get("/api/users", { preHandler: adminOnly }, async () => database.prepare(
-    "SELECT id, username, role, created_at AS createdAt FROM users ORDER BY username COLLATE NOCASE"
-  ).all());
+    "SELECT id, username, role, created_at AS createdAt, immich_api_key IS NOT NULL AS immichApiKeyConfigured FROM users ORDER BY username COLLATE NOCASE"
+  ).all().map((row) => {
+    const account = row as { immichApiKeyConfigured: number };
+    return { ...account, immichApiKeyConfigured: Boolean(account.immichApiKeyConfigured) };
+  }));
 
   app.post<{ Body: { username?: unknown; password?: unknown; role?: unknown } }>(
     "/api/users", { preHandler: adminOnly },
@@ -225,13 +228,44 @@ export function registerAccessRoutes(app: FastifyInstance, database: DatabaseSyn
 
   app.get("/api/admin/albums", { preHandler: adminOnly }, async () => database.prepare(`SELECT
     albums.immich_album_id AS id, albums.owner_id AS ownerId, users.username AS ownerName,
+    users.immich_api_key IS NOT NULL AS ownerHasImmichKey,
     albums.visibility, albums.metadata_json AS metadataJson
     FROM albums JOIN users ON users.id = albums.owner_id ORDER BY users.username, albums.immich_album_id`).all()
     .map((row) => {
-      const album = row as { metadataJson: string };
+      const album = row as { metadataJson: string; ownerHasImmichKey: number };
       const { metadataJson, ...rest } = album;
-      return { ...rest, metadata: JSON.parse(metadataJson) };
+      return { ...rest, ownerHasImmichKey: Boolean(album.ownerHasImmichKey), metadata: JSON.parse(metadataJson) };
     }));
+
+  app.put<{ Params: { albumId: string }; Body: { ownerUserId?: unknown } }>(
+    "/api/admin/albums/:albumId/owner", { preHandler: adminOnly },
+    async (request, reply) => {
+      const ownerUserId = request.body?.ownerUserId;
+      if (typeof ownerUserId !== "string" || !ownerUserId) {
+        return reply.code(400).send({ message: "Neuer Album-Eigentümer fehlt" });
+      }
+      const album = albumRow(database, request.params.albumId);
+      if (!album) return reply.code(404).send({ message: "Album nicht gefunden" });
+      const target = database.prepare("SELECT immich_api_key FROM users WHERE id = ?").get(ownerUserId) as
+        { immich_api_key: string | null } | undefined;
+      if (!target) return reply.code(404).send({ message: "Mapper-Konto nicht gefunden" });
+      if (!target.immich_api_key) {
+        return reply.code(409).send({ message: "Das Zielkonto muss zuerst einen persönlichen Immich-API-Key hinterlegen" });
+      }
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        database.prepare("UPDATE albums SET owner_id = ? WHERE immich_album_id = ?")
+          .run(ownerUserId, request.params.albumId);
+        database.prepare("DELETE FROM album_grants WHERE immich_album_id = ? AND user_id = ?")
+          .run(request.params.albumId, ownerUserId);
+        database.exec("COMMIT");
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
+      return { transferred: true, ownerUserId };
+    }
+  );
 
   app.put<{ Params: { albumId: string }; Body: { visibility?: unknown; userIds?: unknown; publicConfirmed?: unknown } }>(
     "/api/albums/:albumId/access", async (request, reply) => {

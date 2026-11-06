@@ -101,6 +101,33 @@ test("album grants require owner control, are revocable and public access requir
       payload: { visibility: "public", publicConfirmed: true }
     })).statusCode, 200);
     assert.equal(canReadAlbum(database, undefined, "album"), true);
+
+    addOwnedAlbum(database, admin.id, "transfer-album");
+    const memberAccount = (await app.inject({ url: "/api/users", headers: adminHeaders })).json()
+      .find((account) => account.id === member.id);
+    assert.equal(memberAccount.immichApiKeyConfigured, true);
+    assert.equal((await app.inject({
+      method: "PUT", url: "/api/admin/albums/transfer-album/owner", headers: refreshedMemberHeaders,
+      payload: { ownerUserId: member.id }
+    })).statusCode, 403);
+    assert.equal((await app.inject({
+      method: "PUT", url: "/api/admin/albums/transfer-album/owner", headers: adminHeaders,
+      payload: { ownerUserId: "unknown-user" }
+    })).statusCode, 404);
+    database.prepare("UPDATE users SET immich_api_key = NULL WHERE id = ?").run(member.id);
+    assert.equal((await app.inject({
+      method: "PUT", url: "/api/admin/albums/transfer-album/owner", headers: adminHeaders,
+      payload: { ownerUserId: member.id }
+    })).statusCode, 409);
+    database.prepare("UPDATE users SET immich_api_key = ? WHERE id = ?")
+      .run(encryptSecret("test-member-key", encryptionKey), member.id);
+    assert.equal((await app.inject({
+      method: "PUT", url: "/api/admin/albums/transfer-album/owner", headers: adminHeaders,
+      payload: { ownerUserId: member.id }
+    })).statusCode, 200);
+    assert.equal(database.prepare("SELECT owner_id FROM albums WHERE immich_album_id = 'transfer-album'").get().owner_id, member.id);
+    assert.equal(Boolean(canReadAlbum(database, member, "transfer-album")), true);
+    assert.equal(canReadAlbum(database, admin, "transfer-album"), false);
   } finally {
     globalThis.fetch = originalFetch;
     await app.close();

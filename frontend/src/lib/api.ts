@@ -10,7 +10,15 @@ export type Album = {
   isOwner?: boolean;
 };
 export type AuthUser = { id: string; username: string; role: "admin" | "user" };
-export type Account = AuthUser & { createdAt: string };
+export type Account = AuthUser & { createdAt: string; immichApiKeyConfigured: boolean };
+export type AdminAlbum = {
+  id: string;
+  ownerId: string;
+  ownerName: string;
+  ownerHasImmichKey: boolean;
+  visibility: "private" | "shared" | "public";
+  metadata: { albumName?: string };
+};
 export type SharedTour = Pick<Tour, "id" | "title" | "date" | "distanceKm" | "elevationGainM" | "hasKomootMap"> &
   Partial<Pick<Tour, "activityType">>;
 
@@ -189,6 +197,12 @@ export const api = {
   saveUserSettings: (value: { immichApiKey?: string; currentPassword?: string; newPassword?: string }) =>
     request<{ immichApiKeyConfigured: boolean }>("/api/user/settings", { method: "PUT", body: JSON.stringify(value) }),
   users: () => request<Account[]>("/api/users"),
+  adminAlbums: () => request<AdminAlbum[]>("/api/admin/albums"),
+  transferAlbum: (albumId: string, ownerUserId: string) =>
+    request<{ transferred: boolean; ownerUserId: string }>(
+      `/api/admin/albums/${encodeURIComponent(albumId)}/owner`,
+      { method: "PUT", body: JSON.stringify({ ownerUserId }) }
+    ),
   selectableUsers: () => request<Array<Pick<AuthUser, "id" | "username">>>("/api/users/selectable"),
   createUser: (username: string, password: string, role: "admin" | "user" = "user") =>
     request<{ created: boolean }>("/api/users", { method: "POST", body: JSON.stringify({ username, password, role }) }),

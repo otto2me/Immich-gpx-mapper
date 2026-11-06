@@ -214,6 +214,11 @@ Mapper-Konten lesend freigeben oder es nach einer ausdrücklichen Bestätigung
 öffentlich schalten. Freigaben ändern keine Immich-Berechtigungen; Albumfotos
 werden serverseitig mit dem Key des Eigentümers abgerufen.
 
+Der Administrator kann unter **Einstellungen → Konto → Album-Eigentum
+übertragen** einzelne Alben gezielt einem anderen Konto mit gespeichertem
+Immich-Key übertragen. Danach bearbeitet dieses Konto das Album; Sichtbarkeit
+und bestehende Lesefreigaben bleiben erhalten.
+
 Georeferenzierte Fotos aus dem Immich-Album erscheinen als anklickbare Marker
 auf der GPX-Karte. Die Albumfotos lassen sich über **Albumfotos** ein- und
 ausklappen. Ein Klick öffnet das Foto im Immich-Album-Viewer; dafür muss

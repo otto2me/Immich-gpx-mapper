@@ -70,6 +70,9 @@ gehören zu diesem Album und erben zunächst dessen Leserechte.
 Nur der Eigentümer darf Albuminhalte bearbeiten, löschen, Benutzerfreigaben
 verwalten oder das Album veröffentlichen. Benutzerfreigaben sind zunächst
 reine Lesefreigaben; gemeinsames Bearbeiten ist nicht Teil dieses Schritts.
+Administratoren können das Eigentum gezielt auf ein anderes Konto übertragen;
+das Zielkonto muss einen persönlichen Immich-Key hinterlegt haben. Sichtbarkeit
+und bestehende Lesefreigaben bleiben bei der Übertragung erhalten.
 Touren erhalten zunächst keine separaten Sichtbarkeitsschalter.
 Ein Bericht darf ausdrücklich privat bleiben, obwohl das Album für Benutzer
 freigegeben oder öffentlich ist. Ohne diese Einschränkung erbt er die
@@ -473,6 +476,8 @@ regulären Screenshot-Endpunkt erfolgreich aufgenommen und gespeichert.
 | `POST` | `/api/auth/logout` | Abmelden |
 | `GET` | `/api/users/selectable` | Konten für Albumfreigaben auswählen |
 | `GET`/`PUT` | `/api/albums/:albumId/access` | Albumfreigaben verwalten; nur Eigentümer |
+| `GET` | `/api/admin/albums` | Mapper-Alben und Eigentümer für Administratoren auflisten |
+| `PUT` | `/api/admin/albums/:albumId/owner` | Album-Eigentum auf ein Konto mit Immich-Key übertragen |
 
 Tour-Ressourcen unterstützen `?tourId=<Tour-ID>`. Die ID wird stets zusammen
 mit der Album-ID geprüft; eine fremde oder unbekannte Tour liefert 404.
