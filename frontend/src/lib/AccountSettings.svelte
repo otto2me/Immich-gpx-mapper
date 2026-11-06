@@ -149,26 +149,26 @@
     } finally {
       busy = false;
     }
+  }
 
-    async function transferAlbum(album: AdminAlbum) {
-      const newOwnerId = albumOwners[album.id];
-      if (!newOwnerId || newOwnerId === album.ownerId) return;
-      const newOwner = accounts.find((account) => account.id === newOwnerId);
-      if (!confirm(`„${album.metadata.albumName ?? album.id}“ an ${newOwner?.username ?? "das ausgewählte Konto"} übertragen?\n\nDanach kann nur der neue Eigentümer das Album bearbeiten und dessen Immich-Key wird für Albumzugriffe verwendet.`)) return;
-      busy = true;
-      error = "";
-      notice = "";
-      try {
-        await api.transferAlbum(album.id, newOwnerId);
-        albums = await api.adminAlbums();
-        albumOwners = Object.fromEntries(albums.map((item) => [item.id, item.ownerId]));
-        onImmichKeySaved();
-        notice = `Eigentum von „${album.metadata.albumName ?? album.id}“ übertragen.`;
-      } catch (reason) {
-        error = message(reason);
-      } finally {
-        busy = false;
-      }
+  async function transferAlbum(album: AdminAlbum) {
+    const newOwnerId = albumOwners[album.id];
+    if (!newOwnerId || newOwnerId === album.ownerId) return;
+    const newOwner = accounts.find((account) => account.id === newOwnerId);
+    if (!confirm(`„${album.metadata.albumName ?? album.id}“ an ${newOwner?.username ?? "das ausgewählte Konto"} übertragen?\n\nDanach kann nur der neue Eigentümer das Album bearbeiten und dessen Immich-Key wird für Albumzugriffe verwendet.`)) return;
+    busy = true;
+    error = "";
+    notice = "";
+    try {
+      await api.transferAlbum(album.id, newOwnerId);
+      albums = await api.adminAlbums();
+      albumOwners = Object.fromEntries(albums.map((item) => [item.id, item.ownerId]));
+      onImmichKeySaved();
+      notice = `Eigentum von „${album.metadata.albumName ?? album.id}“ übertragen.`;
+    } catch (reason) {
+      error = message(reason);
+    } finally {
+      busy = false;
     }
   }
 </script>
