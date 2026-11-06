@@ -7,6 +7,7 @@ import Fastify from "fastify";
 import { openDatabase } from "../dist/database.js";
 import { registerAccessRoutes, canReadAlbum } from "../dist/access.js";
 import { encryptSecret } from "../dist/crypto.js";
+import { registerImmichRoutes } from "../dist/immich.js";
 import { addOwnedAlbum, login, registerTestAuth, testConfig } from "./support.mjs";
 
 test("album grants require owner control, are revocable and public access requires confirmation", async () => {
@@ -14,13 +15,24 @@ test("album grants require owner control, are revocable and public access requir
   const config = testConfig(dataDir);
   const database = await openDatabase(config);
   const app = Fastify();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (new URL(String(url)).pathname === "/api/albums") {
+      return Response.json([{ id: "album", albumName: "Album", assetCount: 1 }]);
+    }
+    throw new Error(`Unexpected Immich request: ${url}`);
+  };
   try {
     const { admin, encryptionKey } = await registerTestAuth(app, database, config);
     addOwnedAlbum(database, admin.id, "album");
     registerAccessRoutes(app, database, encryptionKey);
+    await registerImmichRoutes(app, config, database, encryptionKey);
 
     assert.equal((await app.inject({ url: "/api/users/selectable" })).statusCode, 401);
     const adminHeaders = await login(app);
+    assert.deepEqual((await app.inject({ url: "/api/user/settings", headers: adminHeaders })).json(), {
+      immichApiKeyConfigured: true
+    });
     assert.deepEqual((await app.inject({ url: "/api/albums/album/access", headers: adminHeaders })).json(), {
       visibility: "private", userIds: []
     });
@@ -30,6 +42,14 @@ test("album grants require owner control, are revocable and public access requir
     });
     assert.equal(created.statusCode, 201);
     const member = database.prepare("SELECT id, username, role FROM users WHERE username = 'member'").get();
+    database.prepare("UPDATE users SET immich_api_key = ? WHERE id = ?")
+      .run(encryptSecret("test-member-key", encryptionKey), member.id);
+    const memberHeaders = await login(app, "member", "MemberPassword123!");
+    assert.deepEqual((await app.inject({ url: "/api/user/settings", headers: memberHeaders })).json(), {
+      immichApiKeyConfigured: true
+    });
+    assert.deepEqual((await app.inject({ url: "/api/albums", headers: memberHeaders })).json(), []);
+    assert.equal((await app.inject({ url: "/api/albums/album", headers: memberHeaders })).statusCode, 404);
     assert.deepEqual((await app.inject({ url: "/api/users/selectable", headers: adminHeaders })).json()
       .map(({ username }) => username), ["member", "test-admin"]);
     assert.equal(canReadAlbum(database, member, "album"), false);
@@ -45,17 +65,18 @@ test("album grants require owner control, are revocable and public access requir
     })).statusCode, 200);
     assert.equal(canReadAlbum(database, member, "album"), true);
 
-    const staleMemberHeaders = await login(app, "member", "MemberPassword123!");
+    const staleMemberHeaders = memberHeaders;
     assert.equal((await app.inject({
       method: "PUT", url: `/api/users/${member.id}`, headers: adminHeaders,
       payload: { password: "ChangedMemberPassword123!" }
     })).statusCode, 200);
     assert.equal((await app.inject({ url: "/api/auth/session", headers: staleMemberHeaders })).json().authenticated, false);
     assert.equal((await app.inject({ url: "/api/users/selectable", headers: adminHeaders })).statusCode, 200);
-    const memberHeaders = await login(app, "member", "ChangedMemberPassword123!");
-    assert.equal((await app.inject({ url: "/api/albums/album/access", headers: memberHeaders })).statusCode, 404);
+    const refreshedMemberHeaders = await login(app, "member", "ChangedMemberPassword123!");
+    assert.equal((await app.inject({ url: "/api/albums", headers: refreshedMemberHeaders })).json().length, 1);
+    assert.equal((await app.inject({ url: "/api/albums/album/access", headers: refreshedMemberHeaders })).statusCode, 404);
     assert.equal((await app.inject({
-      method: "PUT", url: "/api/albums/album/access", headers: memberHeaders,
+      method: "PUT", url: "/api/albums/album/access", headers: refreshedMemberHeaders,
       payload: { visibility: "public", publicConfirmed: true }
     })).statusCode, 404);
 
@@ -81,6 +102,7 @@ test("album grants require owner control, are revocable and public access requir
     })).statusCode, 200);
     assert.equal(canReadAlbum(database, undefined, "album"), true);
   } finally {
+    globalThis.fetch = originalFetch;
     await app.close();
     database.close();
     await rm(dataDir, { recursive: true, force: true });

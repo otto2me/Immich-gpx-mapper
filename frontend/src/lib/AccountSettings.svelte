@@ -158,7 +158,12 @@
 
   <form onsubmit={saveKey}>
     <h2>Immich-Verbindung</h2>
-    <p class="muted">{keyConfigured ? "Ein API-Key ist gespeichert und wird nicht angezeigt." : "Noch kein API-Key gespeichert."} Der Key wird verschlüsselt auf dem Mapper-Server gespeichert.</p>
+    <div class="key-status" class:configured={keyConfigured} role="status" aria-live="polite">
+      <strong>Persönlicher Immich-API-Key: {keyConfigured ? "Hinterlegt" : "Nicht hinterlegt"}</strong>
+      <span>{keyConfigured
+        ? "Der Key ist verschlüsselt im Mapper gespeichert und wird für Immich-Abfragen dieses Kontos verwendet."
+        : "Ohne Key kann dieses Konto keine eigenen Immich-Alben laden."}</span>
+    </div>
     <label>Persönlicher Immich-API-Key<input type="password" autocomplete="new-password" bind:value={apiKey} disabled={busy} /></label>
     <div class="actions"><button type="submit" disabled={busy || !apiKey}>Key speichern</button>{#if keyConfigured}<button type="button" class="quiet" disabled={busy} onclick={clearKey}>Key entfernen</button>{/if}</div>
   </form>
@@ -197,6 +202,9 @@
 <style>
   .account-settings { max-width: 860px; margin: 0 auto; display: grid; gap: 24px; }
   h1 { margin: 0; font-size: 30px; }
+  .key-status { display: grid; gap: 4px; padding: 12px 14px; border: 1px solid #d5a548; border-radius: 6px; color: #704b0b; background: #fff8df; }
+  .key-status.configured { border-color: #9ac9a7; color: #205a32; background: #edf8ef; }
+  .key-status span { font-size: 14px; }
   h2 { margin: 0; font-size: 20px; }
   form, .accounts { display: grid; gap: 14px; padding: 22px 0; border-top: 1px solid #dce3db; }
   label { display: grid; min-width: 0; gap: 7px; font-size: 14px; }
@@ -205,7 +213,7 @@
   button:disabled { opacity: .5; }
   .actions { display: flex; gap: 10px; }
   .quiet { color: #637168; }
-  .muted, small { color: #637168; font-size: 14px; }
+  small { color: #637168; font-size: 14px; }
   .accounts ul { display: grid; gap: 16px; list-style: none; padding: 0; }
   .accounts li { display: grid; grid-template-columns: minmax(100px, 1fr) repeat(3, minmax(140px, 1fr)); gap: 10px; align-items: end; padding: 14px; border: 1px solid #dce3db; border-radius: 7px; }
   .accounts li > div { display: grid; gap: 5px; align-self: center; }

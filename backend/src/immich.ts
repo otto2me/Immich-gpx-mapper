@@ -154,7 +154,9 @@ export async function registerImmichRoutes(
         }
       }
     }
-    return [...result.values()].map((album) => {
+    return [...result.values()]
+      .filter((album) => canReadAlbum(database, user, album.id))
+      .map((album) => {
       const policy = albumRow(database, album.id);
       return {
         ...album,
@@ -162,7 +164,7 @@ export async function registerImmichRoutes(
         visibility: policy?.visibility,
         isOwner: Boolean(user && policy?.owner_id === user.id)
       };
-    }).sort((first, second) => first.albumName.localeCompare(second.albumName));
+      }).sort((first, second) => first.albumName.localeCompare(second.albumName));
   });
 
   app.get<{ Params: { albumId: string } }>(
