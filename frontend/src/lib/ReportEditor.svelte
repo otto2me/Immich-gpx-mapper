@@ -1,12 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { ArrowUp, ArrowDown, Trash2, Plus, Images, X, Check, Save, RefreshCw } from "@lucide/svelte";
-  import { api, tourResource, type Album, type Asset, type Tour, type TravelReport, type ReportChapter } from "./api.js";
+  import { api, tourResource, type Album, type Asset, type SharedTour, type TravelReport, type ReportChapter } from "./api.js";
   import ReportSharing from "./ReportSharing.svelte";
 
-  let { album, tours, canEdit, sharingEnabled = true, onOpenTour, loadReport, dirty = $bindable(false), saving = $bindable(false) }: {
-    album: Album; tours: Tour[]; canEdit: boolean; onOpenTour: (id: string) => void | Promise<void>;
-    sharingEnabled?: boolean; loadReport?: () => Promise<TravelReport | null>; dirty?: boolean; saving?: boolean
+  let { album, tours, canEdit, sharingEnabled = true, onOpenTour = () => undefined, loadReport, sharedResources = false, allowTourNavigation = true, dirty = $bindable(false), saving = $bindable(false) }: {
+    album: Album; tours: SharedTour[]; canEdit: boolean; onOpenTour?: (id: string) => void | Promise<void>;
+    sharingEnabled?: boolean; loadReport?: () => Promise<TravelReport | null>; sharedResources?: boolean; allowTourNavigation?: boolean; dirty?: boolean; saving?: boolean
   } = $props();
   let draft = $state<TravelReport>({ title: "", introduction: "", chapters: [], revision: 0 });
   let savedSnapshot = $state("");
@@ -39,7 +39,7 @@
     notice = "";
     try {
       const saved = await (loadReport ? loadReport() : api.report(album.id));
-      draft = saved ?? { title: album.albumName, introduction: "", chapters: [], revision: 0 };
+      draft = saved ?? { title: album.albumName, introduction: "", chapters: [], isPrivate: false, revision: 0 };
       savedSnapshot = JSON.stringify(draft);
       loaded = true;
       pickerChapterId = null;
@@ -140,7 +140,14 @@
   }
 
   function image(assetId: string, preview = false) {
-    return `/api/assets/${encodeURIComponent(assetId)}/thumbnail${preview ? "?size=preview" : ""}`;
+    if (sharedResources) {
+      const query = new URLSearchParams({ albumId: album.id });
+      if (preview) query.set("size", "preview");
+      return `/api/shared-report-assets/assets/${encodeURIComponent(assetId)}/thumbnail?${query}`;
+    }
+    const query = new URLSearchParams({ albumId: album.id });
+    if (preview) query.set("size", "preview");
+    return `/api/assets/${encodeURIComponent(assetId)}/thumbnail?${query}`;
   }
 
   function dateLabel(date: string | null) {
@@ -178,6 +185,7 @@
         <div class="report-intro">
           <label>Berichtstitel<input maxlength="200" bind:value={draft.title} /></label>
           <label>Einleitung<textarea rows="4" maxlength="20000" bind:value={draft.introduction}></textarea></label>
+          <label class="private-report"><input type="checkbox" bind:checked={draft.isPrivate} />Bericht privat halten (nur Album-Eigentümer; Freigabelinks bleiben gültig)</label>
         </div>
         {#each draft.chapters as chapter, chapterIndex (chapter.id)}
           <section class="chapter-editor" aria-label={`Kapitel ${chapterIndex + 1}`}>
@@ -247,13 +255,13 @@
               {@const tour = linkedTour(chapter.tourId)}
               {#if tour}
                 <div class="story-tour">
-                  <a href={`/?album=${encodeURIComponent(album.id)}&tour=${encodeURIComponent(chapter.tourId)}`} onclick={(event) => {
+                  {#if allowTourNavigation}<a href={`/?album=${encodeURIComponent(album.id)}&tour=${encodeURIComponent(chapter.tourId)}`} onclick={(event) => {
                     if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
                     event.preventDefault();
                     if (chapter.tourId) void onOpenTour(chapter.tourId);
-                  }}>{tour.title || dateLabel(tour.date) || "Tour ansehen"}</a>
+                  }}>{tour.title || dateLabel(tour.date) || "Tour ansehen"}</a>{:else}<span>{tour.title || dateLabel(tour.date) || "Tour"}</span>{/if}
                   <span>{tour.distanceKm !== null ? `${tour.distanceKm} km` : ""}{tour.elevationGainM !== null ? ` · ${tour.elevationGainM} Höhenmeter` : ""}</span>
-                  {#if tour.hasKomootMap}<img src={tourResource(album.id, "/images/komoot-map", chapter.tourId)} alt="Karte der verknüpften Tour" loading="lazy" />{/if}
+                  {#if tour.hasKomootMap}<img src={tourResource(album.id, "/images/komoot-map", chapter.tourId, sharedResources)} alt="Karte der verknüpften Tour" loading="lazy" />{/if}
                 </div>
               {/if}
             {/if}
@@ -304,6 +312,8 @@
   textarea { resize: vertical; line-height: 1.65; font-weight: 400; }
   .report-intro, .chapter-editor { display: grid; gap: 18px; }
   .report-intro { margin-bottom: 32px; }
+  .private-report { display: flex; align-items: flex-start; gap: 9px; font-weight: 400; }
+  .private-report input { flex: 0 0 18px; width: 18px; margin: 2px 0 0; padding: 0; }
   .chapter-editor { padding: 24px 0; border-top: 1px solid var(--report-line); }
   .chapter-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 16px; }
   .photo-picker { padding: 16px 0; border-block: 1px solid var(--report-line); }

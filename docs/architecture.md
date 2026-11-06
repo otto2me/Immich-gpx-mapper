@@ -31,10 +31,8 @@ Mapper-Port sollte auf `127.0.0.1` beschränkt sein.
 
 ## Beschlossenes Zielmodell: Benutzer und Albumrechte (05.11.2026)
 
-Status: beschlossen, noch nicht umgesetzt. Dieser Abschnitt ersetzt für die
-geplante Mehrbenutzerversion die bisherige Entscheidung zum offenen Lesen
-und zum gemeinsamen App-Passwort. Die nachfolgenden Beschreibungen und
-SQL-Beispiele dokumentieren weiterhin den bisherigen Implementierungsstand.
+Status: beschlossen und umgesetzt. Dieser Abschnitt ist das maßgebliche
+Berechtigungsmodell; ältere Abschnitte weiter unten sind entsprechend zu lesen.
 
 ### Konten und Immich-Verbindung
 
@@ -47,6 +45,8 @@ SQL-Beispiele dokumentieren weiterhin den bisherigen Implementierungsstand.
 - Rollen sind Administrator und Benutzer. Kontoverwaltung, globale
   Konfiguration und Sicherung/Wiederherstellung sind Administratoraufgaben;
   persönliche Einstellungen sind davon getrennt.
+- Der initiale Administrator wird beim ersten Start aus
+  `INITIAL_ADMIN_USERNAME` und `INITIAL_ADMIN_PASSWORD` angelegt.
 - Jeder Benutzer hinterlegt seinen eigenen Immich-API-Key in seinen
   Einstellungen. Der Key bleibt serverseitig, wird verschlüsselt gespeichert
   und nach dem Speichern nicht vollständig angezeigt oder protokolliert.
@@ -108,12 +108,18 @@ routen dürfen private Inhalte nicht an den Berechtigungsprüfungen vorbei
 ausliefern. Rechteänderungen müssen auch bei erneuten Ressourcenabrufen greifen.
 
 Bestehende Mapper-Inhalte und der bisherige globale Immich-Key werden einem
-initialen Administratorkonto zugeordnet. IDs, Touren, Kommentare, Upload-
-Referenzen und bestehende Blog-Freigabelinks sollen erhalten bleiben. Vor der
-Migration ist eine vollständige Sicherung erforderlich. Noch festzulegen
-sind der sichere Erstzugang, die Sichtbarkeit bestehender Alben sowie die
-Verwaltung des Verschlüsselungsschlüssels einschließlich Backup/Restore.
-Eine automatische Veröffentlichung alter Inhalte ist nicht beschlossen.
+initialen Administratorkonto zugeordnet. Bestehende Alben starten privat und
+gehören diesem Konto; sie werden nicht automatisch veröffentlicht. IDs,
+Touren, Kommentare, Upload-Referenzen und bestehende Blog-Freigabelinks bleiben
+erhalten. Eine vollständige Sicherung des Datenvolumes vor dem Update ist
+erforderlich.
+
+Der Datenverschlüsselungsschlüssel liegt in `DATA_DIR/key-encryption.key` und
+wird in Backups mitgesichert, damit persönliche Immich-Keys nach einem Restore
+weiter entschlüsselt werden können. Das vollständige Backup wird zusätzlich mit
+`BACKUP_PASSPHRASE` verschlüsselt. Im Compose-Beispiel wird diese Passphrase als
+Docker Secret unter `/run/secrets/backup_passphrase` bereitgestellt; Restore
+fragt sie erneut ab.
 
 Die Abnahme muss mindestens zwei lokale Konten mit getrennten Keys, private
 Album- und Dateizugriffe, reine Benutzer-Lesefreigaben samt Entzug,
@@ -143,17 +149,21 @@ Wiederherstellung abdecken. Direkte Fremd-IDs dürfen keinen Zugriff eröffnen.
 
 ### Konfiguration und Persistenz
 
-Immich-Konfiguration kann über `/data/config.json` und Umgebungsvariablen
-erfolgen. Umgebungsvariablen haben Vorrang. Der API-Key und das App-Passwort
-werden ausschließlich als geheime Compose-Umgebungsvariablen gesetzt und nicht
-in Git eingecheckt. `APP_PASSWORD` ist erforderlich und muss mindestens 12
-Zeichen lang sein.
+Die gemeinsame Immich-Serveradresse kann über `/data/config.json` und
+Umgebungsvariablen konfiguriert werden. Umgebungsvariablen haben Vorrang. Beim
+ersten Start wird `IMMICH_API_KEY` in das initiale Administratorkonto importiert
+und aus `config.json` entfernt. Für eine neue Instanz sind
+`INITIAL_ADMIN_USERNAME` und ein mindestens 12 Zeichen langes
+`INITIAL_ADMIN_PASSWORD` erforderlich. Die mindestens 16 Zeichen lange
+`BACKUP_PASSPHRASE` wird bevorzugt als Compose Secret eingelesen.
 
 Vorgesehene Konfigurationswerte:
 
 - `IMMICH_API_URL`
-- `IMMICH_API_KEY`
-- `APP_PASSWORD`
+- `IMMICH_API_KEY` (nur für die Übernahme eines vorhandenen globalen Keys)
+- `INITIAL_ADMIN_USERNAME`
+- `INITIAL_ADMIN_PASSWORD`
+- `BACKUP_PASSPHRASE_FILE`
 - `DATA_DIR`
 - `BACKUP_DIR`
 - `CONFIG_FILE`
@@ -170,9 +180,11 @@ ein deaktivierter Schalter macht bestehende Linkschlüssel vorübergehend
 unbrauchbar, widerruft sie aber nicht dauerhaft.
 
 `BackupManager` verwendet die SQLite-Backup-API und Streaming-ZIPs mit
-`yazl`/`yauzl`. Das ZIP enthält `mapper.sqlite`, `uploads/...`, optional
-`config.json` und ein versioniertes Manifest mit Dateigrößen und SHA-256-
-Prüfsummen. Sicherungen entstehen zunächst als `.partial` und werden nach
+`yazl`/`yauzl`. Das ZIP enthält `mapper.sqlite`, `key-encryption.key`,
+`uploads/...`, optional `config.json` und ein versioniertes Manifest mit
+Dateigrößen und SHA-256-Prüfsummen. Das gesamte ZIP wird im Streaming-Verfahren
+mit AES-256-GCM und einer aus `BACKUP_PASSPHRASE` abgeleiteten Schlüsseldatei
+verschlüsselt. Sicherungen entstehen zunächst als `.partial` und werden nach
 vollständigem Schreiben umbenannt. Nur danach greift die Aufbewahrung auf
 eindeutig benannte Mapper-Archive im konfigurierten Sicherungsordner.
 
@@ -200,10 +212,10 @@ nur noch bereinigt, nicht gegen einen schon erneuerten Datenbankstand
 zurückgetauscht. Nach Import werden alle Sitzungen entfernt; für die
 Dateikonfiguration ist ein Container-Neustart nötig.
 
-Grenzen: 1 GiB ZIP-Upload, 4 GiB entpackte Daten, 20.000 ZIP-Einträge;
-kompatibles aktuelles Datenbankschema erforderlich. Archive sind nicht
-verschlüsselt. Immich-Originale und Container-Umgebungsvariablen sind kein
-Bestandteil dieser Sicherung. `BACKUP_DIR` sollte ein separat gemounteter,
+Grenzen: 1 GiB verschlüsselter Upload, 4 GiB entpackte Daten, 20.000
+ZIP-Einträge; kompatibles aktuelles Datenbankschema erforderlich. Immich-
+Originale und Container-Umgebungsvariablen sind kein Bestandteil dieser
+Sicherung. `BACKUP_DIR` sollte ein separat gemounteter,
 geschützter NAS-Ordner sein; weder `DATA_DIR` selbst noch `uploads` sind als
 Ziel zulässig.
 
@@ -311,6 +323,7 @@ CREATE TABLE reports (
   title TEXT NOT NULL,
   introduction TEXT NOT NULL DEFAULT '',
   chapters_json TEXT NOT NULL DEFAULT '[]',
+  is_private INTEGER NOT NULL DEFAULT 0 CHECK(is_private IN (0, 1)),
   revision INTEGER NOT NULL DEFAULT 1,
   updated_at TEXT NOT NULL
 );
@@ -320,8 +333,9 @@ Die Reihenfolge der validierten Kapitel und Fotos wird im JSON-Dokument
 gespeichert. Jede Kapitel-ID ist innerhalb des Berichts eindeutig. Beim
 Speichern werden Tour- und Fotozugehörigkeit zum Album serverseitig geprüft;
 dafür werden erforderlichenfalls alle Immich-Metadatenseiten gelesen.
-Gespeicherte Berichte sind ausdrücklich ohne Anmeldung lesbar. Nur das
-Schreiben erfordert die vorhandene Mapper-Sitzung. Antworten verwenden
+Berichte erben die Albumleserechte, sofern der Eigentümer sie nicht ausdrücklich
+privat setzt. Bestehende Berichte werden bei der Migration nicht privat
+geschaltet. Schreiben erfordert die Eigentümersitzung. Antworten verwenden
 `Cache-Control: no-store`. „Reisebericht“ steht in der Albumauswahl vor
 „Touren“ und ist die Standardansicht; direkte Tour- und Übersichtslinks
 bleiben erhalten. Die Leseansicht ist auch für angemeldete Besucher zunächst
@@ -336,18 +350,11 @@ Während des Speicherns sind diese Navigationsaktionen gesperrt.
 
 Grenzen der ersten Version: höchstens 100 Kapitel, 100 Fotos je Kapitel und
 500 Fotoeinträge insgesamt; der Anfragebody ist auf 1.000.000 Bytes begrenzt.
-Es gibt keinen HTML-/Markdown-Editor. Jede gespeicherte Version ist für
-Mapper-Besucher lesbar, sowohl regulär als auch über einen aktiven Freigabelink.
+Es gibt keinen HTML-/Markdown-Editor.
 Der Berichts-Deep-Link lautet
 `/?album=<Album-ID>&view=report`.
 
-### Freigabelinks im bisherigen offenen Lesemodus
-
-Bisherige Entscheidung, durch das Zielmodell vom 05.11.2026 abgelöst:
-Das offene Lesen bleibt im aktuellen Implementierungsstand bestehen. Ein Widerruf
-deaktiviert den konkreten Freigabelink, nicht den normalen Album-/Berichtszugriff.
-Die bisherigen allgemeinen Album- und Medien-Leserouten bleiben unverändert.
-Dies ist keine tokenbasierte Zugriffssperre für sämtliche Berichtsinhalte.
+### Blog-Freigabelinks
 
 ```sql
 CREATE TABLE report_shares (
@@ -377,37 +384,25 @@ setzt Referrer-/Robots-Metadaten und zeigt keine Bearbeitungswerkzeuge.
 Die Lese-API prüft den Hash, `revoked_at` und die optionale Ablaufzeit bei
 jedem Abruf. Ungültige, abgelaufene und widerrufene Links erhalten identisch
 HTTP 404. Antworten verwenden `Cache-Control: no-store`; die Link-Lese-API
-setzt zusätzlich `X-Robots-Tag: noindex, nofollow`. Geliefert wird die aktuell
-gespeicherte Berichtsversion mit ihren Tourverweisen, kein eingefrorener Stand.
-Eine Freigabe erzeugt keinerlei Schreibberechtigung. Widerrufen ist idempotent
-und prüft die Albumzugehörigkeit der Freigabe.
+setzt zusätzlich `X-Robots-Tag: noindex, nofollow`. Ein kurzlebiger HttpOnly-
+Cookie erlaubt die erneute Berechtigungsprüfung für ausschließlich im Bericht
+eingebettete Bilder und Tourressourcen. Geliefert wird die aktuell gespeicherte
+Berichtsversion, kein eingefrorener Stand. Eine Freigabe erzeugt keinerlei
+Schreibberechtigung. Widerrufen ist idempotent und prüft die Albumzugehörigkeit.
 
 Beim Öffnen oder Neuladen eines widerrufenen Links wird der Bericht nicht
 mehr angezeigt. Bereits beim Empfänger geladene oder gespeicherte Inhalte
-lassen sich nicht zurückholen; ebenso bleiben die normalen offenen Medien-
-und Albumrouten erreichbar. Ein zukünftiger ausschließlich linkgebundener
-Modus müsste diese Routen gemeinsam absichern und wäre eine andere
-Zugriffsregel als die aktuell gewählte.
+lassen sich nicht zurückholen. Ein gültiger Link öffnet weder die Albumgalerie
+noch andere Touren oder beliebige Asset-IDs. Unabhängig davon können Album-
+Sichtbarkeit oder eine separate Mapper-Freigabe Lesen weiterhin erlauben.
 
 ## Benutzer und Immich-Berechtigungen
 
-Der aktuelle Betrieb verwendet einen serverseitigen `IMMICH_API_KEY`. Dieser
-gehört zu dem Immich-Konto, das ihn erstellt hat; Immich beschränkt die
-API-Antworten auf die Berechtigungen dieses Kontos. Das gemeinsame
-`APP_PASSWORD` des Mappers übernimmt keine Immich-Anmeldung und unterscheidet
-Mapper-Benutzer nicht. Alle Mapper-Benutzer sehen deshalb dieselben Alben und
-Tourdaten, die für den konfigurierten API-Key erreichbar sind.
-
-**Entscheidung für den Familienbetrieb:** Ein dediziertes Immich-Konto erhält
-nur die gewünschten, gemeinsam genutzten Alben. Alle Familienmitglieder nutzen
-dieselbe Mapper-Ansicht und sehen diese freigegebenen Alben. Das entspricht dem
-aktuellen Modell mit einem serverseitigen API-Key. Für getrennte
-Benutzerbereiche braucht es individuelle Mapper-
-Identitäten und eine Zuordnung zu je einem benutzergebundenen Immich-API-Key.
-API-Keys müssten serverseitig verschlüsselt und mit einem getrennt verwalteten
-Schlüssel (z. B. Docker Secret) geschützt werden. Tourdaten und Kommentare
-benötigen außerdem eine explizite Besitzer-/Freigabeprüfung; die Album-ID allein
-isoliert Benutzer nicht.
+Jede Anfrage an Immich verwendet den verschlüsselten persönlichen API-Key des
+Album-Eigentümers. Mapper-Sichtbarkeit verleiht keine Berechtigung in Immich;
+Immich bleibt die Quelle für die serverseitig erreichbaren Alben und Fotos.
+Alben, die noch keiner lokalen Identität zugeordnet sind, werden beim ersten
+Zugriff vom angemeldeten Benutzer übernommen.
 
 ## Komoot-Integration
 
@@ -451,7 +446,7 @@ regulären Screenshot-Endpunkt erfolgreich aufgenommen und gespeichert.
 | `GET` | `/api/albums/:albumId/tours` | Touren des Albums auflisten |
 | `DELETE` | `/api/albums/:albumId/mapper-data` | Lokale Album-Zusatzdaten mit Anmeldung und `confirm: true` löschen |
 | `POST` | `/api/albums/:albumId/tours` | Tour mit Datum und Zeitzone anlegen |
-| `GET` | `/api/albums/:albumId/report` | Gespeicherten Bericht ohne Anmeldung lesen |
+| `GET` | `/api/albums/:albumId/report` | Gespeicherten Bericht mit Album-/Berichtsrechten lesen |
 | `PUT` | `/api/albums/:albumId/report` | Validierten Bericht mit Versionsprüfung speichern |
 | `GET` | `/api/albums/:albumId/report/shares` | Linkmetadaten lesen; Anmeldung erforderlich |
 | `POST` | `/api/albums/:albumId/report/shares` | Freigabelink erstellen; Schlüssel einmalig ausgeben |
@@ -474,19 +469,21 @@ regulären Screenshot-Endpunkt erfolgreich aufgenommen und gespeichert.
 | `GET` | `/api/tours/:albumId/images/:kind` | Hochgeladenes Bild ausliefern |
 | `GET`/`POST` | `/api/tours/:albumId/comments` | Kommentare lesen/hinzufügen |
 | `GET` | `/api/auth/session` | Anmeldestatus abrufen |
-| `POST` | `/api/auth/login` | Mit gemeinsamem App-Passwort anmelden |
+| `POST` | `/api/auth/login` | Mit lokalem Benutzerkonto anmelden |
 | `POST` | `/api/auth/logout` | Abmelden |
+| `GET` | `/api/users/selectable` | Konten für Albumfreigaben auswählen |
+| `GET`/`PUT` | `/api/albums/:albumId/access` | Albumfreigaben verwalten; nur Eigentümer |
 
 Tour-Ressourcen unterstützen `?tourId=<Tour-ID>`. Die ID wird stets zusammen
 mit der Album-ID geprüft; eine fremde oder unbekannte Tour liefert 404.
 Ohne ID bleiben alte Album-URLs kompatibel: eine undatierte Tour hat Vorrang,
 ansonsten wird die früheste datierte Tour verwendet.
 
-Der API-Key wird nur serverseitig an Immich gesendet. Alle schreibenden
-API-Routen sind durch ein gemeinsames App-Passwort geschützt. Eine erfolgreiche
-Anmeldung setzt ein HttpOnly-/SameSite-Session-Cookie; Sitzungen laufen nach
-12 Stunden ab oder werden beim Neustart des Containers verworfen. Die Anwendung
-hat keine individuelle Benutzerverwaltung.
+Der API-Key wird nur serverseitig an Immich gesendet. Schreibende API-Routen
+erfordern eine Sitzung; Albuminhalte zusätzlich die Eigentümerberechtigung.
+Eine erfolgreiche Anmeldung setzt ein HttpOnly-/SameSite-Session-Cookie;
+Sitzungen laufen nach 12 Stunden ab oder werden beim Neustart des Containers
+verworfen.
 
 Bodylose Anfragen wie `POST /api/auth/logout` senden keinen JSON-Inhaltstyp.
 Der Frontend-Client setzt `application/json` nur bei einem vorhandenen,

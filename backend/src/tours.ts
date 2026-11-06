@@ -10,6 +10,8 @@ import { DatabaseSync } from "node:sqlite";
 import { captureKomootScreenshots } from "./komoot-screenshots.js";
 import { publicKomootEmbedUrl } from "./komoot.js";
 import { parseTourSchedule, selectTour } from "./tour-selection.js";
+import { getSession } from "./auth.js";
+import { canReadAlbum, reportShareFromRequest, requireAlbumOwner, requireAlbumRead } from "./access.js";
 
 const maxUploadBytes = 20 * 1024 * 1024;
 const allowedImages = new Map([
@@ -112,6 +114,7 @@ export async function registerTourRoutes(
   app.delete<{ Params: { albumId: string }; Body: { confirm?: unknown } }>(
     "/api/albums/:albumId/mapper-data",
     async (request, reply) => {
+      requireAlbumOwner(database, request, request.params.albumId);
       if (request.body?.confirm !== true) return reply.code(400).send({ message: "Löschen der Mapper-Einträge muss ausdrücklich bestätigt werden" });
       const albumId = request.params.albumId;
       const rows = database.prepare("SELECT * FROM tours WHERE immich_album_id = ?").all(albumId) as Tour[];
@@ -150,25 +153,30 @@ export async function registerTourRoutes(
     }
   );
 
-  app.get("/api/tours/komoot-linked-albums", async () => {
+  app.get("/api/tours/komoot-linked-albums", async (request) => {
     const rows = database.prepare(`
       SELECT DISTINCT immich_album_id
       FROM tours
       WHERE komoot_link IS NOT NULL AND TRIM(komoot_link) != ''
     `).all() as Array<{ immich_album_id: string }>;
-    return rows.map(({ immich_album_id }) => immich_album_id);
+    return rows.map(({ immich_album_id }) => immich_album_id)
+      .filter((albumId) => canReadAlbum(database, getSession(request), albumId));
   });
 
   app.get<{ Params: { albumId: string } }>(
     "/api/albums/:albumId/tours",
-    async (request) => (database.prepare(
-      "SELECT * FROM tours WHERE immich_album_id = ? ORDER BY tour_date IS NOT NULL, tour_date, id"
-    ).all(request.params.albumId) as Tour[]).map(toApiTour)
+    async (request) => {
+      requireAlbumRead(database, request, request.params.albumId);
+      return (database.prepare(
+        "SELECT * FROM tours WHERE immich_album_id = ? ORDER BY tour_date IS NOT NULL, tour_date, id"
+      ).all(request.params.albumId) as Tour[]).map(toApiTour);
+    }
   );
 
   app.post<{ Params: { albumId: string }; Body: TourInput }>(
     "/api/albums/:albumId/tours",
     async (request, reply) => {
+      requireAlbumOwner(database, request, request.params.albumId);
       const schedule = parseTourSchedule(request.body ?? {});
       if (!schedule.date) return reply.code(400).send({ message: "Bitte ein Tourdatum wählen" });
       let title: string | null;
@@ -193,12 +201,16 @@ export async function registerTourRoutes(
 
   app.get<{ Params: { albumId: string } }>(
     "/api/tours/:albumId",
-    async (request) => toApiTour(getTour(database, request.params.albumId, request.query))
+    async (request) => {
+      requireAlbumRead(database, request, request.params.albumId);
+      return toApiTour(getTour(database, request.params.albumId, request.query));
+    }
   );
 
   app.put<{ Params: { albumId: string }; Body: TourInput }>(
     "/api/tours/:albumId",
     async (request, reply) => {
+      requireAlbumOwner(database, request, request.params.albumId);
       try {
         const { activityType, komootLink, description, direction, distanceKm, elevationGainM } =
           request.body ?? {};
@@ -289,6 +301,7 @@ export async function registerTourRoutes(
   app.post<{ Params: { albumId: string } }>(
     "/api/tours/:albumId/gpx",
     async (request, reply) => {
+      requireAlbumOwner(database, request, request.params.albumId);
       const part = await request.file();
       if (!part || part.fieldname !== "file") {
         return reply.code(400).send({ message: "GPX-Datei fehlt" });
@@ -316,6 +329,7 @@ export async function registerTourRoutes(
   }>(
     "/api/tours/:albumId/komoot-screenshots",
     async (request, reply) => {
+      requireAlbumOwner(database, request, request.params.albumId);
       const link = request.body?.url;
       if (typeof link !== "string" || link.length > 2048) {
         return reply.code(400).send({ message: "Bitte zuerst einen gültigen Komoot-Link angeben" });
@@ -377,6 +391,7 @@ export async function registerTourRoutes(
   app.get<{ Params: { albumId: string } }>(
     "/api/tours/:albumId/gpx",
     async (request, reply) => {
+      requireAlbumRead(database, request, request.params.albumId);
       const tour = getTour(database, request.params.albumId, request.query);
       if (!tour?.gpx_file_path) {
         return reply.code(404).send({ message: "Für dieses Album ist keine GPX-Datei vorhanden" });
@@ -393,6 +408,7 @@ export async function registerTourRoutes(
   app.post<{ Params: { albumId: string; kind: string } }>(
     "/api/tours/:albumId/images/:kind",
     async (request, reply) => {
+      requireAlbumOwner(database, request, request.params.albumId);
       if (request.params.kind !== "komoot-map" && request.params.kind !== "elevation") {
         return reply.code(404).send({ message: "Bildtyp nicht gefunden" });
       }
@@ -422,6 +438,7 @@ export async function registerTourRoutes(
   app.get<{ Params: { albumId: string; kind: string } }>(
     "/api/tours/:albumId/images/:kind",
     async (request, reply) => {
+      requireAlbumRead(database, request, request.params.albumId);
       const tour = getTour(database, request.params.albumId, request.query);
       const storedPath =
         request.params.kind === "komoot-map"
@@ -448,9 +465,32 @@ export async function registerTourRoutes(
     }
   );
 
+  app.get<{ Params: { albumId: string; kind: string }; Querystring: { tourId?: string } }>(
+    "/api/shared-report-assets/tours/:albumId/images/:kind",
+    async (request, reply) => {
+      const share = reportShareFromRequest(database, request);
+      const tourId = request.query.tourId;
+      if (!share || share.albumId !== request.params.albumId || request.params.kind !== "komoot-map" ||
+          !tourId || !share.tourIds.has(tourId)) {
+        return reply.code(404).send({ message: "Bild nicht gefunden" });
+      }
+      const tour = database.prepare("SELECT * FROM tours WHERE id = ? AND immich_album_id = ?")
+        .get(tourId, share.albumId) as Tour | undefined;
+      if (!tour?.komoot_map_image_path) return reply.code(404).send({ message: "Bild nicht gefunden" });
+      const filePath = uploadPath(config, tour.komoot_map_image_path);
+      const mimeType = new Map([
+        [".jpg", "image/jpeg"], [".png", "image/png"], [".webp", "image/webp"]
+      ]).get(extname(filePath));
+      if (!mimeType) return reply.code(404).send({ message: "Bild nicht gefunden" });
+      return reply.header("cache-control", "no-store").type(mimeType)
+        .header("x-content-type-options", "nosniff").send(await readFile(filePath));
+    }
+  );
+
   app.get<{ Params: { albumId: string } }>(
     "/api/tours/:albumId/comments",
     async (request) => {
+      requireAlbumRead(database, request, request.params.albumId);
       const tour = getTour(database, request.params.albumId, request.query);
       if (!tour) return [];
       return database.prepare(`
@@ -464,6 +504,7 @@ export async function registerTourRoutes(
     Params: { albumId: string };
     Body: { author?: unknown; text?: unknown };
   }>("/api/tours/:albumId/comments", async (request, reply) => {
+    requireAlbumOwner(database, request, request.params.albumId);
     let text: string | null;
     let author: string | null;
     try {

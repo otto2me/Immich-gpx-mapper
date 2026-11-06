@@ -16,6 +16,7 @@
   let notice = $state("");
   let restoreFile = $state<File | null>(null);
   let restoreConfirmation = $state("");
+  let restorePassphrase = $state("");
 
   function message(reason: unknown) { return reason instanceof Error ? reason.message : "Einstellungen konnten nicht geladen werden"; }
   function date(value: string) { return new Date(value).toLocaleString("de-DE", { dateStyle: "medium", timeStyle: "short" }); }
@@ -68,7 +69,7 @@
     if (!restoreFile || restoreConfirmation !== "WIEDERHERSTELLEN") return;
     if (!confirm("Alle Mapper-Daten durch diese Sicherung ersetzen? Der aktuelle Stand wird vorher zusätzlich gesichert.")) return;
     busy = true; backupError = ""; notice = "";
-    try { const result = await api.restoreBackup(restoreFile); onRestored(result); }
+    try { const result = await api.restoreBackup(restoreFile, restorePassphrase); onRestored(result); }
     catch (reason) { backupError = message(reason); }
     finally { busy = false; }
   }
@@ -106,7 +107,7 @@
         <dl><dt>Sicherungsordner im Container</dt><dd>{status.directory}</dd><dt>Letzte Sicherung</dt><dd>{status.lastBackupAt ? date(status.lastBackupAt) : "Noch keine Sicherung"}</dd><dt>Status</dt><dd>{status.operation === "restore" ? "Wiederherstellung läuft" : status.operation === "backup" ? "Sicherung läuft" : status.dirty ? "Änderungen seit letzter Sicherung" : "Aktuell"}</dd></dl>
         {#if status.lastError}<p class="error" role="alert">Letzter Sicherungsfehler: {status.lastError}</p>{/if}
       {/if}
-      <p class="muted">Der Ordner muss als beschreibbares NAS-Verzeichnis gemountet sein. Die ZIP-Dateien enthalten Datenbank, Uploads und eine vorhandene Dateikonfiguration, aber keine Immich-Originalfotos oder Container-Umgebungsvariablen. Sie können Zugangsdaten aus der Dateikonfiguration enthalten und sind nicht verschlüsselt.</p>
+      <p class="muted">Der Ordner muss als beschreibbares NAS-Verzeichnis gemountet sein. Die Sicherungen enthalten Datenbank, Uploads, den Datenschlüssel und eine vorhandene Dateikonfiguration, aber keine Immich-Originalfotos oder Container-Umgebungsvariablen. Jede ZIP-Sicherung ist vollständig mit BACKUP_PASSPHRASE verschlüsselt.</p>
       {#if backupError}<p class="error" role="alert">{backupError}</p>{/if}
       {#if items.length}
         <ul class="backup-list">{#each items as item (item.name)}<li><div><strong>{item.kind === "safety" ? "Sicherheitskopie vor Import" : "Mapper-Sicherung"}</strong><span>{date(item.createdAt)} · {size(item.size)}</span><small>{item.name}</small></div><a href={`/api/backups/${encodeURIComponent(item.name)}`} title="ZIP herunterladen" aria-label={`Sicherung ${date(item.createdAt)} herunterladen`}><Download size={18} /></a></li>{/each}</ul>
@@ -115,10 +116,11 @@
 
     <section class="restore-section" aria-label="Sicherung importieren">
       <h2>Sicherung importieren</h2>
-      <p>Der Import ersetzt alle Mapper-Daten einschließlich Einstellungen und Uploads. Vorher wird der aktuelle Stand zusätzlich gesichert. Alle Sitzungen werden danach abgemeldet. Die ZIP-Datei darf höchstens 1 GiB groß sein; entpackt sind bis zu 4 GiB zulässig.</p>
+      <p>Der Import ersetzt alle Mapper-Daten einschließlich Einstellungen, Uploads und Datenschlüssel. Vorher wird der aktuelle Stand zusätzlich gesichert. Alle Sitzungen werden danach abgemeldet. Die ZIP-Datei darf höchstens 1 GiB groß sein; entpackt sind bis zu 4 GiB zulässig.</p>
       <label>Mapper-ZIP auswählen<input type="file" accept=".zip,application/zip" disabled={busy || !!status?.operation} onchange={(event) => { restoreFile = event.currentTarget.files?.[0] ?? null; restoreConfirmation = ""; }} /></label>
+      <label>Backup-Passphrase<input type="password" autocomplete="current-password" bind:value={restorePassphrase} disabled={busy || !!status?.operation} /></label>
       <label>Zur Bestätigung WIEDERHERSTELLEN eingeben<input autocomplete="off" bind:value={restoreConfirmation} disabled={busy || !!status?.operation} /></label>
-      <button class="restore-button" type="button" disabled={busy || !!status?.operation || !restoreFile || restoreFile.size > 1024 * 1024 * 1024 || restoreConfirmation !== "WIEDERHERSTELLEN"} onclick={restore}><Upload size={17} />Sicherung wiederherstellen</button>
+      <button class="restore-button" type="button" disabled={busy || !!status?.operation || !restoreFile || restoreFile.size > 1024 * 1024 * 1024 || restoreConfirmation !== "WIEDERHERSTELLEN" || !restorePassphrase} onclick={restore}><Upload size={17} />Sicherung wiederherstellen</button>
     </section>
   {/if}
 </section>

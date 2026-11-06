@@ -73,7 +73,7 @@
         const popup = document.createElement("div");
         popup.className = "photo-popup";
         const image = document.createElement("img");
-        image.src = `/api/assets/${encodeURIComponent(photo.id)}/thumbnail`;
+        image.src = `/api/assets/${encodeURIComponent(photo.id)}/thumbnail?${new URLSearchParams({ albumId: currentAlbumId })}`;
         image.alt = "Immich-Foto an diesem Standort";
         image.loading = "lazy";
         if (currentImmichWebUrl) {

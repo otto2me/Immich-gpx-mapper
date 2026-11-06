@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Fastify from "fastify";
 import { openDatabase } from "../dist/database.js";
-import { registerAuth } from "../dist/auth.js";
 import { registerTourRoutes } from "../dist/tours.js";
+import { login, registerTestAuth, testConfig } from "./support.mjs";
 
 test("album reset removes only confirmed local data and preserves other albums, shared files and backups", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "mapper-delete-"));
@@ -22,15 +22,15 @@ test("album reset removes only confirmed local data and preserves other albums, 
     insert.run("other", "other-album", "2026-01-01", "other.gpx", "shared.png", "now", "now");
     database.prepare("INSERT INTO comments VALUES(?, ?, ?, ?, ?)").run("comment", "one", null, "delete", "now");
     database.prepare("INSERT INTO comments VALUES(?, ?, ?, ?, ?)").run("other-comment", "other", null, "keep", "now");
-    database.prepare("INSERT INTO reports VALUES(?, ?, ?, ?, ?, ?, ?)").run("report", "album", "Delete", "", "[]", 1, "now");
-    database.prepare("INSERT INTO reports VALUES(?, ?, ?, ?, ?, ?, ?)").run("other-report", "other-album", "Keep", "", "[]", 1, "now");
+    database.prepare("INSERT INTO reports(id, immich_album_id, title, introduction, chapters_json, revision, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?)").run("report", "album", "Delete", "", "[]", 1, "now");
+    database.prepare("INSERT INTO reports(id, immich_album_id, title, introduction, chapters_json, revision, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?)").run("other-report", "other-album", "Keep", "", "[]", 1, "now");
     database.prepare("INSERT INTO report_shares(id, report_id, token_hash, label, created_at) VALUES(?, ?, ?, ?, ?)").run("share", "report", "hash", "Delete", "now");
-    await registerAuth(app, { appPassword: "DeleteTestPassword123!" });
+    const config = testConfig(dataDir);
+    await registerTestAuth(app, database, config);
     await registerTourRoutes(app, database, { dataDir });
     const url = "/api/albums/album/mapper-data";
     assert.equal((await app.inject({ method: "DELETE", url, payload: { confirm: true } })).statusCode, 401);
-    const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { password: "DeleteTestPassword123!" } });
-    const headers = { cookie: login.headers["set-cookie"].split(";")[0] };
+    const headers = await login(app);
     assert.equal((await app.inject({ method: "DELETE", url, headers, payload: {} })).statusCode, 400);
     assert.equal(database.prepare("SELECT count(*) AS count FROM tours").get().count, 3);
     database.exec("CREATE TRIGGER reject_report_delete BEFORE DELETE ON reports BEGIN SELECT RAISE(ABORT, 'test rejection'); END;");

@@ -126,6 +126,7 @@ export async function openDatabase(config: AppConfig) {
       title TEXT NOT NULL,
       introduction TEXT NOT NULL DEFAULT '',
       chapters_json TEXT NOT NULL DEFAULT '[]',
+      is_private INTEGER NOT NULL DEFAULT 0 CHECK(is_private IN (0, 1)),
       revision INTEGER NOT NULL DEFAULT 1,
       updated_at TEXT NOT NULL
     );
@@ -140,5 +141,38 @@ export async function openDatabase(config: AppConfig) {
     );
     CREATE INDEX IF NOT EXISTS report_shares_report ON report_shares(report_id);
   `);
+  const reportColumns = database.prepare("PRAGMA table_info(reports)").all();
+  if (!reportColumns.some((column) => column.name === "is_private")) {
+    database.exec("ALTER TABLE reports ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0 CHECK(is_private IN (0, 1))");
+  }
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('admin', 'user')),
+      immich_api_key TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS albums (
+      immich_album_id TEXT PRIMARY KEY,
+      owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      visibility TEXT NOT NULL DEFAULT 'private'
+        CHECK(visibility IN ('private', 'shared', 'public')),
+      metadata_json TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE TABLE IF NOT EXISTS album_grants (
+      immich_album_id TEXT NOT NULL REFERENCES albums(immich_album_id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (immich_album_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS albums_owner ON albums(owner_id);
+    CREATE INDEX IF NOT EXISTS albums_visibility ON albums(visibility);
+  `);
+  const albumColumns = database.prepare("PRAGMA table_info(albums)").all();
+  if (!albumColumns.some((column) => column.name === "metadata_json")) {
+    database.exec("ALTER TABLE albums ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'");
+  }
   return database;
 }

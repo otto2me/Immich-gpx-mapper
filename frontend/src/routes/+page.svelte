@@ -6,6 +6,8 @@
   import ReportEditor from "../lib/ReportEditor.svelte";
   import SharedReport from "../lib/SharedReport.svelte";
   import SettingsPage from "../lib/SettingsPage.svelte";
+  import AccountSettings from "../lib/AccountSettings.svelte";
+  import AlbumAccess from "../lib/AlbumAccess.svelte";
   import { Settings, Trash2 } from "@lucide/svelte";
   import {
     api,
@@ -15,6 +17,7 @@
     tourResource,
     type Album,
     type Asset,
+    type AuthUser,
     type Comment,
     type MapMarker,
     type KomootPreview,
@@ -27,6 +30,7 @@
   let komootLinkedAlbumIds = $state<string[]>([]);
   let albumsPage = $state(1);
   let selectedAlbum = $state<Album | null>(null);
+  let user = $state<AuthUser | null>(null);
   let albumDataVersion = $state(0);
   let shareToken = $state("");
   let settingsView = $state(false);
@@ -67,6 +71,7 @@
   let search = $state("");
   let onlyKomootLinked = $state(false);
   let password = $state("");
+  let username = $state("");
   let author = $state("");
   let commentText = $state("");
   let imageVersion = $state(0);
@@ -82,6 +87,7 @@
   const albumAssetsTotalPages = $derived(
     Math.max(1, Math.ceil(albumAssetsTotal / albumAssetsPageSize))
   );
+  const canEditAlbum = $derived(Boolean(authenticated && user && selectedAlbum?.isOwner));
 
   const filteredAlbums = $derived(
     albums.filter((album) =>
@@ -137,10 +143,8 @@
     photoMapError = "";
     loading = true;
     try {
-      const [album, savedTours] = await Promise.all([
-        api.album(id),
-        api.tours(id)
-      ]);
+      const album = await api.album(id);
+      const savedTours = await api.tours(id);
       if (revision !== albumRevision) return;
       selectedAlbum = album;
       tours = savedTours;
@@ -303,7 +307,9 @@
       immichWebUrl = null;
     }
     try {
-      authenticated = (await api.session()).authenticated;
+      const session = await api.session();
+      authenticated = session.authenticated;
+      user = session.user;
     } catch (reason) {
       error = message(reason);
     }
@@ -367,10 +373,13 @@
     busy = true;
     error = "";
     try {
-      await api.login(password);
+      const result = await api.login(username, password);
       authenticated = true;
+      user = result.user;
       password = "";
-      notice = "Du bist angemeldet und kannst Tourdaten bearbeiten.";
+      username = "";
+      notice = "Du bist angemeldet.";
+      await loadAlbums();
     } catch (reason) {
       error = message(reason);
     } finally {
@@ -385,6 +394,7 @@
     try {
       await api.logout();
       authenticated = false;
+      user = null;
       reportDirty = false;
       notice = "Du wurdest abgemeldet.";
     } catch (reason) {
@@ -507,7 +517,7 @@
   }
 
   function thumbnail(assetId: string) {
-    return `/api/assets/${encodeURIComponent(assetId)}/thumbnail`;
+    return `/api/assets/${encodeURIComponent(assetId)}/thumbnail?${new URLSearchParams({ albumId: selectedAlbum?.id ?? "" })}`;
   }
 
   function assetTitle(asset: Asset) {
@@ -551,13 +561,14 @@
 
   function backupRestored(result: import("../lib/api.js").RestoreResult) {
     authenticated = false;
+    user = null;
     reportDirty = false;
     settingsBusy = false;
     notice = `Sicherung wiederhergestellt. Bitte den Container neu starten und erneut anmelden. Sicherheitskopie: ${result.safetyBackup}${result.warning ? ` · ${result.warning}` : ""}`;
   }
 
   async function deleteAlbumData() {
-    if (!selectedAlbum || !authenticated || busy || reportSaving || settingsBusy) return;
+    if (!selectedAlbum || !canEditAlbum || busy || reportSaving || settingsBusy) return;
     const albumId = selectedAlbum.id;
     if (!confirm(`Alle Mapper-Einträge zu „${selectedAlbum.albumName}“ löschen?\n\nTouren, Kommentare, Reisebericht, Freigabelinks und lokale Uploads werden entfernt. Das Immich-Album, seine Fotos und vorhandene ZIP-Sicherungen bleiben erhalten.${reportDirty ? "\n\nUngespeicherte Berichtsänderungen werden verworfen." : ""}`)) return;
     busy = true;
@@ -596,12 +607,14 @@
     <span>Immich <strong>GPX Mapper</strong></span>
   </a>
   {#if !shareToken}<div class="auth">
-    {#if authenticated}
+    {#if authenticated && user}
       <button class="quiet-button settings-button" type="button" title="Einstellungen" aria-label="Einstellungen" disabled={reportSaving || settingsBusy} onclick={openSettings}><Settings size={19} /></button>
-      <span class="auth-state"><span class="dot"></span> Bearbeitungsmodus</span>
+      <span class="auth-state"><span class="dot"></span> {user.username}</span>
       <button class="quiet-button" disabled={reportSaving || settingsBusy} onclick={logout}>Abmelden</button>
     {:else}
       <form class="login-form" onsubmit={login}>
+        <label class="sr-only" for="login-username">Benutzername</label>
+        <input id="login-username" type="text" placeholder="Benutzername" autocomplete="username" bind:value={username} />
         <label class="sr-only" for="app-password">App-Passwort</label>
         <input
           id="app-password"
@@ -610,7 +623,7 @@
           autocomplete="current-password"
           bind:value={password}
         />
-        <button class="small-button" type="submit" disabled={busy || !password}>
+        <button class="small-button" type="submit" disabled={busy || !username || !password}>
           Anmelden
         </button>
       </form>
@@ -635,14 +648,17 @@
   {#if shareToken}
     {#key shareToken}<SharedReport token={shareToken} />{/key}
   {:else if settingsView}
-    {#if authenticated}<SettingsPage onSaved={settingsSaved} onRestored={backupRestored} bind:busy={settingsBusy} />{:else}<h1>Einstellungen</h1><p>Für Einstellungen und Sicherungen bitte anmelden.</p>{/if}
+    {#if authenticated && user}
+      <AccountSettings user={user} onImmichKeySaved={() => { void loadAlbums(); }} />
+      {#if user.role === "admin"}<SettingsPage onSaved={settingsSaved} onRestored={backupRestored} bind:busy={settingsBusy} />{/if}
+    {:else}<h1>Einstellungen</h1><p>Bitte zuerst anmelden.</p>{/if}
   {:else if selectedAlbum}
     <section class="album-heading">
       <div>
         <p class="eyebrow">Immich-Album</p>
         <div class="album-title-row">
           <h1>{selectedAlbum.albumName}</h1>
-          {#if authenticated}
+          {#if canEditAlbum}
             <button class="delete-album-data" type="button" title="Mapper-Einträge dieses Albums löschen" aria-label="Mapper-Einträge löschen" disabled={busy || reportSaving || settingsBusy || selectingTour} onclick={deleteAlbumData}><Trash2 size={16} /></button>
           {/if}
         </div>
@@ -652,6 +668,7 @@
         </p>
       </div>
       <div class="album-actions">
+      {#if canEditAlbum}<AlbumAccess album={selectedAlbum} onSaved={(visibility) => { if (selectedAlbum) selectedAlbum.visibility = visibility; }} />{/if}
       {#if albumView === "tours" && tour.komootLink}
         <a class="komoot-button" href={tour.komootLink} target="_blank" rel="noreferrer">
           Tour in Komoot öffnen ↗
@@ -666,7 +683,7 @@
     </div>
 
     {#if albumView === "report"}
-      {#key `${selectedAlbum.id}:${authenticated}:${albumDataVersion}`}<ReportEditor album={selectedAlbum} {tours} canEdit={authenticated} {sharingEnabled} onOpenTour={openReportTour} bind:dirty={reportDirty} bind:saving={reportSaving} />{/key}
+      {#key `${selectedAlbum.id}:${canEditAlbum}:${albumDataVersion}`}<ReportEditor album={selectedAlbum} {tours} canEdit={canEditAlbum} {sharingEnabled} onOpenTour={openReportTour} bind:dirty={reportDirty} bind:saving={reportSaving} />{/key}
     {:else}
     <nav class="tour-navigation" aria-label="Touren im Album">
       <div class="tour-tabs" role="tablist" tabindex="-1" aria-label="Tagesauswahl" onkeydown={onTourTabKeydown}>
@@ -675,7 +692,7 @@
           <button type="button" role="tab" aria-selected={selectedTourId === item.id} aria-controls="tour-content" tabindex={selectedTourId === item.id ? 0 : -1} title={item.title || tourDateLabel(item.date)} disabled={busy} onclick={() => selectTour(item.id ?? null)}>{tourDateLabel(item.date)}</button>
         {/each}
       </div>
-      {#if authenticated}
+      {#if canEditAlbum}
         <button class="secondary-button" type="button" disabled={busy || selectingTour} onclick={() => (addingTour = !addingTour)}>Tour anlegen</button>
       {/if}
     </nav>
@@ -689,7 +706,7 @@
       <option value="UTC"></option>
     </datalist>
 
-    {#if authenticated && addingTour}
+    {#if canEditAlbum && addingTour}
       <form class="tour-create" onsubmit={createTour}>
         <label>Titel<input maxlength="160" bind:value={newTourTitle} /></label>
         <label>Tourdatum<input type="date" required bind:value={newTourDate} /></label>
@@ -779,7 +796,7 @@
           {/if}
         </div>
 
-        {#if authenticated}
+        {#if canEditAlbum}
           <form class="tour-form" onsubmit={saveTour}>
             <label>Titel<input maxlength="160" bind:value={tour.title} /></label>
             <div class="schedule-grid">
@@ -933,7 +950,7 @@
               <strong>GPX-Track</strong>
               <span>{tour.hasGpx ? "Track vorhanden" : "Noch kein Track hochgeladen"}</span>
             </div>
-            {#if authenticated}
+            {#if canEditAlbum}
               <label class="file-button">
                 {tour.hasGpx ? "Ersetzen" : "GPX hochladen"}
                 <input
@@ -950,7 +967,7 @@
               <strong>Komoot-Karte</strong>
               <span>{tour.hasKomootMap ? "Bild vorhanden" : "Optionales Vorschaubild"}</span>
             </div>
-            {#if authenticated}
+            {#if canEditAlbum}
               <label class="file-button">
                 Bild hochladen
                 <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onchange={(event) => uploadFile("komoot-map", event.currentTarget.files?.[0])} />
@@ -962,7 +979,7 @@
               <strong>Höhenprofil</strong>
               <span>{tour.hasElevationProfile ? "Bild vorhanden" : "Optionales Vorschaubild"}</span>
             </div>
-            {#if authenticated}
+            {#if canEditAlbum}
               <label class="file-button">
                 Bild hochladen
                 <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onchange={(event) => uploadFile("elevation", event.currentTarget.files?.[0])} />
@@ -1088,7 +1105,7 @@
         {:else}
           <p class="muted">Noch keine Kommentare zu dieser Tour.</p>
         {/if}
-        {#if authenticated}
+        {#if canEditAlbum}
           <form class="comment-form" onsubmit={addComment}>
             <div class="form-row">
               <label>

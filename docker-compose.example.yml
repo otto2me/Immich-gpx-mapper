@@ -6,12 +6,16 @@ services:
     environment:
       IMMICH_API_URL: ${IMMICH_API_URL:-http://immich-server:2283}
       IMMICH_WEB_URL: ${IMMICH_WEB_URL:-}
-      IMMICH_API_KEY: ${IMMICH_API_KEY:?Set IMMICH_API_KEY in .env}
-      APP_PASSWORD: ${APP_PASSWORD:?Set APP_PASSWORD in .env}
+      IMMICH_API_KEY: ${IMMICH_API_KEY:-}
+      INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME:?Set INITIAL_ADMIN_USERNAME in .env}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:?Set INITIAL_ADMIN_PASSWORD in .env}
+      BACKUP_PASSPHRASE_FILE: /run/secrets/backup_passphrase
       DATA_DIR: /data
       BACKUP_DIR: /backups
       CONFIG_FILE: /data/config.json
       PORT: 3000
+    secrets:
+      - backup_passphrase
     volumes:
       - ./immich-gpx-mapper-data:/data
       - ./immich-gpx-mapper-backups:/backups
@@ -24,3 +28,7 @@ networks:
   immich-network:
     external: true
     name: ${IMMICH_DOCKER_NETWORK:-immich_default}
+
+secrets:
+  backup_passphrase:
+    file: ${BACKUP_PASSPHRASE_FILE:?Set BACKUP_PASSPHRASE_FILE in .env}

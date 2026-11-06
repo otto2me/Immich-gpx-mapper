@@ -6,21 +6,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Fastify from "fastify";
 import { openDatabase } from "../dist/database.js";
-import { registerAuth } from "../dist/auth.js";
 import { registerReportRoutes } from "../dist/reports.js";
+import { addOwnedAlbum, login, registerTestAuth, testConfig } from "./support.mjs";
 
 test("share links are hashed, expire and revoke independently of the open album reader", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "mapper-share-"));
-  const database = await openDatabase({ dataDir });
+  const config = testConfig(dataDir);
+  const database = await openDatabase(config);
   const app = Fastify();
   try {
-    await registerAuth(app, { appPassword: "ShareTestPassword123!" });
+    const { admin } = await registerTestAuth(app, database, config);
+    addOwnedAlbum(database, admin.id, "album");
     await registerReportRoutes(app, database, async () => true);
     const base = "/api/albums/album/report";
     assert.equal((await app.inject({ url: `${base}/shares` })).statusCode, 401);
     assert.equal((await app.inject({ method: "POST", url: `${base}/shares`, payload: {} })).statusCode, 401);
-    const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { password: "ShareTestPassword123!" } });
-    const headers = { cookie: login.headers["set-cookie"].split(";")[0] };
+    const headers = await login(app);
     assert.equal((await app.inject({ method: "POST", url: `${base}/shares`, headers, payload: {} })).statusCode, 404);
     const insertTour = database.prepare("INSERT INTO tours(id, immich_album_id, tour_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?)");
     insertTour.run("selected-tour", "album", "2026-01-01", "now", "now");
@@ -52,7 +53,8 @@ test("share links are hashed, expire and revoke independently of the open album 
     assert.equal((await app.inject({ method: "POST", url: revokeUrl, headers })).statusCode, 200);
     assert.equal((await app.inject({ method: "POST", url: revokeUrl, headers })).statusCode, 200);
     assert.equal((await read()).statusCode, 404);
-    assert.equal((await app.inject({ url: base })).statusCode, 200);
+    assert.equal((await app.inject({ url: base })).statusCode, 404);
+    assert.equal((await app.inject({ url: base, headers })).statusCode, 200);
     const expired = await app.inject({ method: "POST", url: `${base}/shares`, headers, payload: { expiresAt: new Date(Date.now() + 60000).toISOString() } });
     assert.equal(expired.statusCode, 201);
     database.prepare("UPDATE report_shares SET expires_at = ? WHERE id = ?").run("2000-01-01T00:00:00.000Z", expired.json().share.id);

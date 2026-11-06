@@ -9,13 +9,16 @@ import { ZipFile } from "yazl";
 import { openDatabase } from "../dist/database.js";
 import { BackupManager, recoverInterruptedRestore } from "../dist/backups.js";
 import { defaultSettings, readSettings, writeSettings } from "../dist/settings.js";
+import { loadEncryptionKey } from "../dist/crypto.js";
+import { testConfig } from "./support.mjs";
 
 async function fixture(run) {
   const root = await mkdtemp(join(tmpdir(), "mapper-backup-"));
   const dataDir = join(root, "data");
   const backupDir = join(root, "nas-backups");
-  const config = { dataDir, backupDir, configFile: join(dataDir, "config.json") };
+  const config = testConfig(dataDir, { backupDir, configFile: join(dataDir, "config.json") });
   const database = await openDatabase(config);
+  await loadEncryptionKey(dataDir);
   const manager = new BackupManager(database, config);
   try { await run({ root, dataDir, backupDir, config, database, manager }); }
   finally { manager.stop(); database.close(); await rm(root, { recursive: true, force: true }); }
@@ -28,17 +31,17 @@ test("ZIP snapshot restores tours, reports, settings, uploads and config and cre
     await writeFile(config.configFile, JSON.stringify({ immichApiUrl: "http://saved" }));
     database.prepare("INSERT INTO tours(id, immich_album_id, gpx_file_path, created_at, updated_at) VALUES(?, ?, ?, ?, ?)").run("tour", "album", "track.gpx", "now", "now");
     database.prepare("INSERT INTO comments VALUES(?, ?, ?, ?, ?)").run("comment", "tour", null, "saved", "now");
-    database.prepare("INSERT INTO reports VALUES(?, ?, ?, ?, ?, ?, ?)").run("report", "album", "Saved", "", "[]", 1, "now");
+    database.prepare("INSERT INTO reports(id, immich_album_id, title, introduction, chapters_json, revision, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?)").run("report", "album", "Saved", "", "[]", 1, "now");
     writeSettings(database, { ...defaultSettings, sharingEnabled: false });
     const saved = await manager.create();
     assert.ok(saved.size > 0);
     const zip = await readFile(await manager.archivePath(saved.name));
-    assert.equal(zip.subarray(0, 2).toString(), "PK");
+    assert.equal(zip.subarray(0, 8).toString(), "IMGMAPB1");
     database.prepare("UPDATE reports SET title = 'Changed'").run();
     await writeFile(join(dataDir, "uploads", "track.gpx"), "changed");
     await writeFile(config.configFile, JSON.stringify({ immichApiUrl: "http://changed" }));
     writeSettings(database, { ...defaultSettings, sharingEnabled: true });
-    const restored = await manager.restore(await manager.archivePath(saved.name));
+    const restored = await manager.restore(await manager.archivePath(saved.name), config.backupPassphrase);
     assert.equal(restored.restored, true);
     assert.equal(database.prepare("SELECT title FROM reports").get().title, "Saved");
     assert.equal(database.prepare("SELECT text FROM comments").get().text, "saved");
@@ -69,15 +72,15 @@ test("invalid and tampered archives leave live data untouched", async () => {
   await fixture(async ({ root, database, manager }) => {
     const invalid = join(root, "invalid.zip");
     await writeFile(invalid, "not a zip");
-    await assert.rejects(manager.restore(invalid));
+    await assert.rejects(manager.restore(invalid, "TestBackupPassphrase-2026"));
     assert.equal(manager.status().operation, null);
     const zip = new ZipFile();
     const bad = join(root, "tampered.zip");
     const written = pipeline(zip.outputStream, createWriteStream(bad));
     zip.addBuffer(Buffer.from("invalid sqlite"), "mapper.sqlite");
-    zip.addBuffer(Buffer.from(JSON.stringify({ format: "immich-gpx-mapper", version: 1, files: [{ path: "mapper.sqlite", size: 14, sha256: "wrong" }] })), "manifest.json");
+    zip.addBuffer(Buffer.from(JSON.stringify({ format: "immich-gpx-mapper", version: 2, files: [{ path: "mapper.sqlite", size: 14, sha256: "wrong" }] })), "manifest.json");
     zip.end(); await written;
-    await assert.rejects(manager.restore(bad));
+    await assert.rejects(manager.restore(bad, "TestBackupPassphrase-2026"));
     assert.equal(database.prepare("SELECT count(*) AS count FROM tours").get().count, 0);
     assert.equal(manager.status().operation, null);
     assert.equal((await manager.list()).length, 0);
@@ -136,7 +139,7 @@ test("ZIP traversal paths are rejected before touching live files", async () => 
     let index = 0;
     while ((index = content.indexOf(original, index)) !== -1) { malicious.copy(content, index); index += original.length; }
     await writeFile(path, content);
-    await assert.rejects(manager.restore(path));
+    await assert.rejects(manager.restore(path, "TestBackupPassphrase-2026"));
     await assert.rejects(readFile(join(root, "evil", "x")));
     assert.equal(manager.status().operation, null);
   });

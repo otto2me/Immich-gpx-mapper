@@ -16,8 +16,10 @@ type FileConfig = {
 export type AppConfig = {
   immichApiUrl: string;
   immichWebUrl: string | null;
-  immichApiKey: string;
-  appPassword: string;
+  legacyImmichApiKey: string;
+  initialAdminUsername: string;
+  initialAdminPassword: string;
+  backupPassphrase: string;
   dataDir: string;
   backupDir: string;
   configFile: string;
@@ -75,14 +77,18 @@ export function loadConfig(): AppConfig {
   const configFile = process.env.CONFIG_FILE ?? "/data/config.json";
   const fileConfig = readFileConfig(configFile);
   const port = Number(process.env.PORT ?? "3000");
-  const appPassword = process.env.APP_PASSWORD ?? "";
+  const initialAdminUsername = process.env.INITIAL_ADMIN_USERNAME?.trim() ?? "";
+  const initialAdminPassword = process.env.INITIAL_ADMIN_PASSWORD ?? "";
+  const backupPassphraseFile = process.env.BACKUP_PASSPHRASE_FILE ?? "/run/secrets/backup_passphrase";
+  const backupPassphrase = process.env.BACKUP_PASSPHRASE ??
+    (existsSync(backupPassphraseFile) ? readFileSync(backupPassphraseFile, "utf8").replace(/(?:\r?\n)+$/, "") : "");
   const dataDir = process.env.DATA_DIR ?? "/data";
 
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error("PORT must be an integer between 1 and 65535");
   }
-  if (appPassword.length < 12) {
-    throw new Error("APP_PASSWORD must contain at least 12 characters");
+  if (backupPassphrase.length < 16) {
+    throw new Error("BACKUP_PASSPHRASE must contain at least 16 characters");
   }
 
   return {
@@ -91,8 +97,10 @@ export function loadConfig(): AppConfig {
       fileConfig.immichApiUrl ??
       "http://immich-server:2283",
     immichWebUrl: readImmichWebUrl(),
-    immichApiKey: process.env.IMMICH_API_KEY ?? fileConfig.immichApiKey ?? "",
-    appPassword,
+    legacyImmichApiKey: process.env.IMMICH_API_KEY || fileConfig.immichApiKey || "",
+    initialAdminUsername,
+    initialAdminPassword,
+    backupPassphrase,
     dataDir,
     backupDir: process.env.BACKUP_DIR ?? resolve(dataDir, "backups"),
     configFile,

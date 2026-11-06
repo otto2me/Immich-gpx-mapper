@@ -8,6 +8,7 @@ coverage/
 .env.*
 !.env.example
 immich-gpx-mapper-data/
+/secrets/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

@@ -5,25 +5,27 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Fastify from "fastify";
 import { openDatabase } from "../dist/database.js";
-import { registerAuth } from "../dist/auth.js";
 import { registerReportRoutes } from "../dist/reports.js";
+import { addOwnedAlbum, login, registerTestAuth, testConfig } from "./support.mjs";
 
-test("reports allow anonymous reading but protect writes, membership and concurrent edits", async () => {
+test("reports follow album visibility, protect private reports, writes, membership and concurrent edits", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "mapper-report-"));
   let database = await openDatabase({ dataDir });
   const app = Fastify();
   try {
     database.prepare("INSERT INTO tours(id, immich_album_id, created_at, updated_at) VALUES(?, ?, ?, ?)").run("tour-own", "album", "now", "now");
     database.prepare("INSERT INTO tours(id, immich_album_id, created_at, updated_at) VALUES(?, ?, ?, ?)").run("tour-foreign", "other", "now", "now");
-    await registerAuth(app, { appPassword: "ReportTestPassword123!" });
+    const config = testConfig(dataDir);
+    const { admin } = await registerTestAuth(app, database, config);
+    addOwnedAlbum(database, admin.id, "album");
+    addOwnedAlbum(database, admin.id, "other");
     await registerReportRoutes(app, database, async (albumId, ids) => albumId === "album" && ids.every(id => ["photo-one", "photo-two"].includes(id)));
     const url = "/api/albums/album/report";
-    assert.equal((await app.inject({ url })).statusCode, 200);
-    assert.equal((await app.inject({ url })).json(), null);
+    assert.equal((await app.inject({ url })).statusCode, 404);
     assert.equal((await app.inject({ method: "PUT", url, payload: {} })).statusCode, 401);
-    const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { password: "ReportTestPassword123!" } });
-    const headers = { cookie: login.headers["set-cookie"].split(";")[0] };
+    const headers = await login(app);
     assert.equal((await app.inject({ url, headers })).json(), null);
+    database.prepare("UPDATE albums SET visibility = 'public' WHERE immich_album_id = ?").run("album");
     const chapter = { id: "chapter-one", title: "Erster Tag", date: "2026-10-23", text: "Absatz eins\n\nAbsatz zwei <script>plain text</script>", tourId: "tour-own", photos: [{ assetId: "photo-one", caption: "Am Gipfel" }] };
     const input = { title: "Unser Urlaub", introduction: "Erinnerungen", revision: 0, chapters: [chapter, { ...chapter, id: "chapter-two", title: "Zweiter Tag", photos: [{ assetId: "photo-two", caption: "Abendlicht" }] }] };
     const saved = await app.inject({ method: "PUT", url, headers, payload: input });
@@ -59,12 +61,20 @@ test("reports allow anonymous reading but protect writes, membership and concurr
     assert.deepEqual(simultaneous.map(response => response.statusCode).sort(), [200, 409]);
     assert.equal((await app.inject({ url: "/api/albums/other/report", headers })).json(), null);
     assert.equal((await app.inject({ url, headers })).headers["cache-control"], "no-store");
+    const privateReport = await app.inject({
+      method: "PUT", url, headers,
+      payload: { ...input, revision: 3, isPrivate: true }
+    });
+    assert.equal(privateReport.statusCode, 200);
+    assert.equal(privateReport.json().isPrivate, true);
+    assert.equal((await app.inject({ url })).statusCode, 404);
+    assert.equal((await app.inject({ url, headers })).json().isPrivate, true);
     assert.equal((await app.inject({ method: "POST", url: "/api/auth/logout", headers })).statusCode, 200);
-    assert.equal((await app.inject({ url, headers })).statusCode, 200);
+    assert.equal((await app.inject({ url, headers })).statusCode, 404);
     assert.equal((await app.inject({ method: "PUT", url, headers, payload: { ...input, revision: 3 } })).statusCode, 401);
     database.close();
     database = await openDatabase({ dataDir });
-    assert.equal(database.prepare("SELECT revision FROM reports WHERE immich_album_id = ?").get("album").revision, 3);
+    assert.equal(database.prepare("SELECT revision FROM reports WHERE immich_album_id = ?").get("album").revision, 4);
   } finally {
     await app.close();
     database.close();

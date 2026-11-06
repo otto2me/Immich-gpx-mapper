@@ -5,7 +5,14 @@ export type Album = {
   albumThumbnailAssetId?: string | null;
   assetCount?: number;
   assets?: Asset[];
+  ownerId?: string;
+  visibility?: "private" | "shared" | "public";
+  isOwner?: boolean;
 };
+export type AuthUser = { id: string; username: string; role: "admin" | "user" };
+export type Account = AuthUser & { createdAt: string };
+export type SharedTour = Pick<Tour, "id" | "title" | "date" | "distanceKm" | "elevationGainM" | "hasKomootMap"> &
+  Partial<Pick<Tour, "activityType">>;
 
 export type Asset = {
   id: string;
@@ -70,6 +77,7 @@ export type TravelReport = {
   title: string;
   introduction: string;
   chapters: ReportChapter[];
+  isPrivate?: boolean;
   revision: number;
   updatedAt?: string;
 };
@@ -82,7 +90,7 @@ export type ReportShare = {
   revokedAt: string | null;
 };
 
-export type SharedReportData = { report: TravelReport; albumId: string; tours: Tour[] };
+export type SharedReportData = { report: TravelReport; albumId: string; tours: SharedTour[] };
 
 export type AppSettings = {
   sharingEnabled: boolean;
@@ -148,9 +156,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function tourResource(albumId: string, suffix = "", tourId?: string | null) {
-  const path = `/api/tours/${encodeURIComponent(albumId)}${suffix}`;
-  return tourId ? `${path}?${new URLSearchParams({ tourId })}` : path;
+export function tourResource(albumId: string, suffix = "", tourId?: string | null, sharedReportResource = false) {
+  const path = sharedReportResource
+    ? `/api/shared-report-assets/tours/${encodeURIComponent(albumId)}${suffix}`
+    : `/api/tours/${encodeURIComponent(albumId)}${suffix}`;
+  const query = new URLSearchParams();
+  if (tourId) query.set("tourId", tourId);
+  return query.size ? `${path}?${query}` : path;
 }
 
 export const api = {
@@ -159,19 +171,36 @@ export const api = {
   saveSettings: (settings: AppSettings) => request<{ settings: AppSettings; backup: BackupStatus }>("/api/settings", { method: "PUT", body: JSON.stringify(settings) }),
   backups: () => request<{ items: BackupInfo[]; status: BackupStatus }>("/api/backups"),
   createBackup: () => request<BackupInfo>("/api/backups", { method: "POST" }),
-  restoreBackup: (file: File) => {
+  restoreBackup: (file: File, passphrase: string) => {
     const body = new FormData();
     body.append("file", file);
+    body.append("passphrase", passphrase);
     return request<RestoreResult>("/api/backups/restore", { method: "POST", body });
   },
-  session: () => request<{ authenticated: boolean }>("/api/auth/session"),
-  login: (password: string) =>
+  session: () => request<{ authenticated: boolean; user: AuthUser | null }>("/api/auth/session"),
+  login: (username: string, password: string) =>
     request<{ authenticated: boolean }>("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify({ password })
+      body: JSON.stringify({ username, password })
     }),
   logout: () =>
     request<{ authenticated: boolean }>("/api/auth/logout", { method: "POST" }),
+  userSettings: () => request<{ immichApiKeyConfigured: boolean }>("/api/user/settings"),
+  saveUserSettings: (value: { immichApiKey?: string; currentPassword?: string; newPassword?: string }) =>
+    request<{ immichApiKeyConfigured: boolean }>("/api/user/settings", { method: "PUT", body: JSON.stringify(value) }),
+  users: () => request<Account[]>("/api/users"),
+  selectableUsers: () => request<Array<Pick<AuthUser, "id" | "username">>>("/api/users/selectable"),
+  createUser: (username: string, password: string, role: "admin" | "user" = "user") =>
+    request<{ created: boolean }>("/api/users", { method: "POST", body: JSON.stringify({ username, password, role }) }),
+  updateUser: (id: string, value: { password?: string; role?: "admin" | "user" }) =>
+    request<{ updated: boolean }>(`/api/users/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(value) }),
+  deleteUser: (id: string) =>
+    request<{ deleted: boolean }>(`/api/users/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  albumAccess: (id: string) => request<{ visibility: "private" | "shared" | "public"; userIds: string[] }>(`/api/albums/${encodeURIComponent(id)}/access`),
+  saveAlbumAccess: (id: string, visibility: "private" | "shared" | "public", userIds: string[], publicConfirmed = false) =>
+    request<{ updated: boolean }>(`/api/albums/${encodeURIComponent(id)}/access`, {
+      method: "PUT", body: JSON.stringify({ visibility, userIds, publicConfirmed })
+    }),
   albums: () => request<Album[]>("/api/albums"),
   komootLinkedAlbums: () => request<string[]>("/api/tours/komoot-linked-albums"),
   album: (id: string) =>

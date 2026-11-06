@@ -23,8 +23,8 @@ HTTP und bindet seinen Port standardmäßig nur an `127.0.0.1`.
 
 - Node.js 26 LTS für lokale Entwicklung
 - Docker Compose für den Containerbetrieb
-- Immich-API-Key mit passenden Lese-Berechtigungen
-- Ein langes, zufällig gewähltes App-Passwort (mindestens 12 Zeichen)
+- Ein lokales Mapper-Administratorkonto mit starkem Passwort
+- Eine separate Backup-Passphrase (mindestens 16 Zeichen)
 - Zugriff des Mapper-Containers auf das Docker-Netzwerk des Immich-Servers
 
 ## Lokal entwickeln
@@ -35,6 +35,11 @@ npm install
 npm run dev
 ```
 
+Vor dem Start `.env` mit einem initialen Benutzernamen/-Passwort und einem
+`BACKUP_PASSPHRASE_FILE` versehen. Die angegebene Datei muss eine mindestens
+16 Zeichen lange Passphrase enthalten; in der lokalen Entwicklung wird sie
+direkt vom Backend gelesen.
+
 Das Frontend ist unter `http://localhost:5173` erreichbar; `/api` wird an das
 Backend auf Port 3000 weitergeleitet. `DATA_DIR` kann für lokale Entwicklung
 auf ein beschreibbares Verzeichnis gesetzt werden.
@@ -44,18 +49,27 @@ auf ein beschreibbares Verzeichnis gesetzt werden.
 1. Dateien dieses Projekts in einen Ordner auf dem Docker-Host legen.
 2. `docker-compose.example.yml` als Service-Ausschnitt in die bestehende
    Immich-Compose-Datei übernehmen (oder separat mit `-f` verwenden).
-3. `.env.example` nach `.env` kopieren und `IMMICH_API_KEY` sowie ein eigenes,
-   zufälliges `APP_PASSWORD` setzen. Für Foto-Links aus dem Browser außerdem
+3. `.env.example` nach `.env` kopieren und `INITIAL_ADMIN_USERNAME` sowie ein
+   eigenes, zufälliges `INITIAL_ADMIN_PASSWORD` setzen. Beim Upgrade den
+   bisherigen `IMMICH_API_KEY` zusätzlich in `.env` setzen; er wird einmalig
+   in das initiale Administratorkonto importiert. Neue Installationen lassen
+   diesen Wert weg und hinterlegen den Key im Konto. Für Foto-Links aus dem
+   Browser außerdem
    `IMMICH_WEB_URL` auf die für Browser erreichbare Immich-Adresse setzen
    (z. B. `https://immich.example.org` oder `http://NAS-IP:8212`). `.env`
    niemals committen.
-4. Falls nötig `IMMICH_API_URL` und `IMMICH_DOCKER_NETWORK` auf die Namen des
+4. Die Backup-Passphrase in `secrets/backup-passphrase.txt` (von Git ignoriert)
+   oder in einer Datei außerhalb des Repositorys ablegen und
+   `BACKUP_PASSPHRASE_FILE` in `.env` auf diese Datei setzen. Compose reicht
+   sie dem Container als Docker Secret weiter. Den Ordner `secrets/` ignoriert
+   Git bereits.
+5. Falls nötig `IMMICH_API_URL` und `IMMICH_DOCKER_NETWORK` auf die Namen des
    eigenen Immich-Stacks anpassen. Das externe Netzwerk muss bereits existieren.
-5. Den Datenordner `immich-gpx-mapper-data` anlegen und bei Bedarf
+6. Den Datenordner `immich-gpx-mapper-data` anlegen und bei Bedarf
    `config.example.json` dort als `config.json` ablegen.
-6. sicherstellen, dass der Ordner für UID 1000 beschreibbar ist (z. B. per
+7. sicherstellen, dass der Ordner für UID 1000 beschreibbar ist (z. B. per
    SSH auf dem Docker-Host mit `sudo chown -R 1000:1000 immich-gpx-mapper-data`).
-7. Compose-Datei in denselben Stack aufnehmen und den Container starten. Das Image wird durch GitHub Actions nach GHCR veröffentlicht, sobald der Workflow auf `main` ausgeführt wurde:
+8. Compose-Datei in denselben Stack aufnehmen und den Container starten. Das Image wird durch GitHub Actions nach GHCR veröffentlicht, sobald der Workflow auf `main` ausgeführt wurde:
 
    ```sh
    docker compose pull immich-gpx-mapper
@@ -86,12 +100,20 @@ curl http://127.0.0.1:3000/api/health
 ## Sicherheit und Daten
 
 - `IMMICH_API_KEY` wird nur an den Backend-Prozess übergeben. Er gehört weder
-  ins Frontend noch in Git.
-- Schreibzugriffe erfordern das App-Passwort. Nach erfolgreicher Anmeldung wird
-  ein HttpOnly-/SameSite-Cookie mit einer 12-stündigen Sitzung gesetzt. Sitzungen
+  ins Frontend noch in Git und wird beim ersten Start in das initiale Konto
+  migriert. Danach hinterlegt jedes Konto seinen eigenen Key in den persönlichen
+  Einstellungen.
+- Schreibzugriffe erfordern eine persönliche Anmeldung. Nach erfolgreicher
+  Anmeldung wird ein HttpOnly-/SameSite-Cookie mit einer 12-stündigen Sitzung gesetzt. Sitzungen
   werden im Arbeitsspeicher gehalten und enden bei einem Container-Neustart.
-- Das App-Passwort wird ausschließlich über `APP_PASSWORD` konfiguriert und muss
-  mindestens 12 Zeichen lang sein.
+- Der initiale Benutzer wird über `INITIAL_ADMIN_USERNAME` und
+  `INITIAL_ADMIN_PASSWORD` konfiguriert; das Passwort muss mindestens 12 Zeichen
+  lang sein. Weitere Konten verwaltet der Administrator in der Anwendung.
+- Neue und migrierte Alben sind privat. Der Eigentümer kann sie gezielt für
+  Mapper-Konten freigeben oder nach ausdrücklicher Bestätigung veröffentlichen.
+- Der Schlüssel für persönliche Immich-Keys liegt in
+  `immich-gpx-mapper-data/key-encryption.key`. Das Datenvolume muss geschützt
+  und zusammen mit dem Backup-Passphrase-Secret gesichert werden.
 - Port 3000 ist standardmäßig nur am Loopback-Interface veröffentlicht. Die
   Synology Reverse-Proxy-Regel soll auf denselben Host zeigen.
 - Das Verzeichnis `immich-gpx-mapper-data` ist persistent und muss für den
@@ -101,9 +123,8 @@ curl http://127.0.0.1:3000/api/health
    `/backups` mounten und ebenfalls für UID 1000 beschreibbar machen. Der
    Compose-Ausschnitt setzt dafür `BACKUP_DIR=/backups`. Möglichst einen
    separaten NAS-Sicherungsordner verwenden, nicht das Upload-Verzeichnis.
-- Die Anmeldung ist ein gemeinsames Passwort, keine individuelle
-  Benutzerverwaltung. Verwende ein starkes, einzigartiges Passwort und betreibe
-  den Dienst nur hinter HTTPS.
+- Betreibe den Dienst nur hinter HTTPS und verwende für jedes Konto ein eigenes,
+  starkes Passwort.
 
 ## Einstellungen und ZIP-Sicherungen
 
@@ -113,7 +134,7 @@ Anmeldung sind Seite und Verwaltungs-API gesperrt.
 - **Teilen verfügbar:** blendet die Linkverwaltung ein/aus. Ausgeschaltet
    funktionieren auch vorhandene Freigabelinks nicht; nach erneutem Aktivieren
    funktionieren weiterhin gültige, nicht widerrufene Links wieder. Der normale
-   offene Album-/Berichtszugriff bleibt unverändert.
+   Album-Sichtbarkeit und persönliche Mapper-Rechte bleiben davon unabhängig.
 - **Komoot-Karte und Höhenprofil:** wählt lokale Bilder oder Remote-Embed als
    Standard. Fehlen lokale Bilder, bleibt das vorhandene Remote-Embed verfügbar.
 - **Automatische Sicherungen:** aus, alle 1–365 Tage, bei Änderungen oder beides.
@@ -141,19 +162,21 @@ volumes:
 ```
 
 Beide Hostpfade vorher anlegen und für Container-UID 1000 beschreibbar machen.
-Backups enthalten einen konsistenten SQLite-Snapshot mit Touren, Kommentaren,
-Berichten, Freigabelinks und Einstellungen, alle Dateien unter `uploads`
-sowie die vorhandene Datei aus `CONFIG_FILE`. Umgebungsvariablen, `.env`,
-Container-Passwort, Container-Image und Immich-Originalfotos werden nicht
-gesichert. Deshalb Portainer-Stack/Umgebungsvariablen und Immich separat sichern.
-Die ZIPs sind nicht verschlüsselt und können einen API-Key aus `config.json`
-enthalten; den NAS-Ordner entsprechend schützen.
+Backups enthalten einen konsistenten SQLite-Snapshot mit Konten, Albumrechten,
+Touren, Kommentaren, Berichten, Freigabelinks und Einstellungen, alle Dateien
+unter `uploads`, den Schlüssel `key-encryption.key` sowie die vorhandene Datei
+aus `CONFIG_FILE`. Das gesamte Backup wird mit `BACKUP_PASSPHRASE` verschlüsselt.
+Umgebungsvariablen, `.env`, Secret-Datei, Container-Image und Immich-Originalfotos
+werden nicht gesichert. Deshalb Stack/Umgebungsvariablen und Secret separat
+sichern und den NAS-Ordner schützen.
 
 ### Wiederherstellen nach Neuinstallation
 
 1. Einen kompatiblen Mapper-Stand installieren und Daten-/Backup-Ordner mounten.
-2. `APP_PASSWORD` und die benötigten Immich-Umgebungsvariablen erneut setzen.
-3. Anmelden, **Einstellungen → Sicherung importieren** öffnen und das ZIP wählen.
+2. `INITIAL_ADMIN_USERNAME`, `INITIAL_ADMIN_PASSWORD` und die benötigten
+   Immich-Umgebungsvariablen erneut setzen; das Backup-Secret wieder bereitstellen.
+3. Als Administrator anmelden, **Einstellungen → Sicherung importieren** öffnen,
+   das ZIP wählen und die Backup-Passphrase eingeben.
 4. `WIEDERHERSTELLEN` eingeben und den Austausch ausdrücklich bestätigen.
 5. Nach erfolgreichem Import den Container neu starten und erneut anmelden.
     Eine wiederhergestellte Dateikonfiguration wird erst beim Neustart geladen;
@@ -174,10 +197,22 @@ Backups ersetzen keine zusätzliche Kopie auf einem anderen Datenträger.
 
 1. Öffne die Mapper-Adresse. Die Alben werden direkt aus Immich geladen.
 2. Wähle ein Album oder öffne einen Deep-Link mit `/?album=<Album-ID>`.
-3. Melde dich mit `APP_PASSWORD` an, um Tourdaten zu bearbeiten, Dateien
+3. Melde dich mit deinem lokalen Mapper-Konto an, um Tourdaten zu bearbeiten, Dateien
    hochzuladen und Kommentare zu schreiben.
 4. GPX-Dateien werden auf der OpenStreetMap-Karte dargestellt. Für die
    Kartendarstellung benötigt der Browser Zugriff auf die OpenStreetMap-Kacheln.
+
+### Konten und Albumfreigaben
+
+Der Administrator legt unter **Einstellungen → Konto** weitere lokale Konten
+an. Jedes Konto hinterlegt dort seinen eigenen Immich-API-Key; dieser Key bleibt
+verschlüsselt auf dem Mapper-Server. Bestehende Mapper-Alben werden dem initialen
+Administrator zugeordnet und starten privat.
+
+Der Eigentümer kann über **Albumfreigabe** ein Album privat lassen, ausgewählten
+Mapper-Konten lesend freigeben oder es nach einer ausdrücklichen Bestätigung
+öffentlich schalten. Freigaben ändern keine Immich-Berechtigungen; Albumfotos
+werden serverseitig mit dem Key des Eigentümers abgerufen.
 
 Georeferenzierte Fotos aus dem Immich-Album erscheinen als anklickbare Marker
 auf der GPX-Karte. Die Albumfotos lassen sich über **Albumfotos** ein- und
@@ -228,7 +263,8 @@ Vor einem produktiven Update das komplette Mapper-Datenverzeichnis sichern.
 ### Reisebericht schreiben
 
 **Reisebericht** steht vor **Touren** und ist die Standardansicht eines Albums.
-Gespeicherte Berichte sind ohne Anmeldung lesbar. Zum Bearbeiten anmelden
+Gespeicherte Berichte folgen den Albumrechten; der Eigentümer kann einen Bericht
+zusätzlich privat halten. Zum Bearbeiten anmelden
 und **Bearbeiten** wählen. Der Bericht gilt für das gesamte Album,
 unabhängig vom ausgewählten Tourtag. Direkte Tour-Links öffnen weiterhin
 die angegebene Tour.
@@ -242,8 +278,8 @@ die angegebene Tour.
 6. **Vorschau** zeigt den Bericht mit einer kompakten Fotoübersicht und
    Tourverweisen. Am Desktop stehen Fotos nebeneinander, mobil untereinander.
    Ein Klick öffnet das Foto in großer Ansicht in einem neuen Tab.
-7. Mit **Speichern** den Bericht dauerhaft ablegen; die gespeicherte Version
-   ist anschließend auch ohne Anmeldung sichtbar.
+7. Optional **Bericht privat halten** aktivieren und mit **Speichern** den Bericht
+   dauerhaft ablegen; andernfalls folgt der Bericht den Albumrechten.
 
 Fotos werden nur über ihre Immich-ID referenziert, nicht kopiert oder in
 andere Alben verschoben. Textabsätze bleiben erhalten; HTML und Markdown
@@ -253,7 +289,7 @@ auch dem Bericht nicht mehr zur Verfügung.
 Bei veralteten Bearbeitungen aus einem zweiten Tab wird das Speichern mit
 einem Konflikt abgewiesen, ohne den lokalen Text zu verwerfen. Vor dem
 Neuladen einer gespeicherten Version gegebenenfalls den eigenen Text sichern.
-Nur das Bearbeiten und Speichern erfordert die gemeinsame Mapper-Anmeldung.
+Nur der Album-Eigentümer kann den Bericht bearbeiten und speichern.
 
 ### Reisebericht teilen
 
@@ -266,14 +302,15 @@ Später sind in der Liste nur Bezeichnung, Status und Zeitangaben verfügbar;
 bei verlorenem Link einen neuen erstellen und den alten widerrufen.
 
 Der Link zeigt die jeweils zuletzt gespeicherte Berichtsversion ohne
-Bearbeitungswerkzeuge. Anmeldung ist zum Lesen nicht nötig. **Widerrufen**
+Bearbeitungswerkzeuge. Anmeldung ist zum Lesen nicht nötig. Er gewährt nur den
+Zugriff auf den Bericht und die darin eingebetteten Ressourcen, nicht auf die
+Albumgalerie. **Widerrufen**
 deaktiviert genau diesen Link; eine gesetzte Ablaufzeit macht ihn ebenfalls
 ungültig. Bereits geladene oder heruntergeladene Inhalte bleiben beim Empfänger.
 
-**Wichtig:** Das ausdrücklich gewünschte offene Lesen bleibt bestehen.
-Ein Widerruf sperrt nicht den normalen Zugriff auf das Album und seinen
-Bericht. Diese Links sind daher keine Zugriffssperre für ansonsten private
-Inhalte.
+Albumfreigaben und öffentliche Sichtbarkeit können unabhängig vom Freigabelink
+weiterhin Lesezugriff gewähren. Der globale Schalter für Teilen sperrt nur
+Blog-Freigabelinks.
 
 Zum externen Teilen die von den Empfängern erreichbare Mapper-Adresse im
 Browser öffnen und dort den Link erzeugen. Ein Link mit `localhost` ist nur

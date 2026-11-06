@@ -15,16 +15,13 @@
     }
   }
 
-  function openTour(id: string) {
-    if (!data) return;
-    location.assign(`/?${new URLSearchParams({ album: data.albumId, tour: id })}`);
-  }
 </script>
 
 <ReportEditor
   album={{ id: data?.albumId ?? "", albumName: "Reisebericht" }}
   tours={data?.tours ?? []}
   canEdit={false}
-  onOpenTour={openTour}
   {loadReport}
+  sharedResources={true}
+  allowTourNavigation={false}
 />

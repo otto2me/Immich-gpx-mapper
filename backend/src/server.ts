@@ -12,6 +12,7 @@ import { registerReportRoutes } from "./reports.js";
 import { registerAdminRoutes } from "./admin.js";
 import { readSettings } from "./settings.js";
 import { recoverInterruptedRestore } from "./backups.js";
+import { registerAccessRoutes } from "./access.js";
 
 const config = loadConfig();
 const database = await openDatabase(config);
@@ -22,8 +23,9 @@ const app = Fastify({
   trustProxy: true
 });
 
-await registerAuth(app, config);
-const immich = await registerImmichRoutes(app, config, database);
+const { encryptionKey } = await registerAuth(app, config, database);
+registerAccessRoutes(app, database, encryptionKey);
+const immich = await registerImmichRoutes(app, config, database, encryptionKey);
 await registerTourRoutes(app, database, config);
 await registerKomootRoutes(app);
 await registerReportRoutes(app, database, immich.albumContainsAssets);
@@ -37,7 +39,7 @@ app.get("/api/config", async () => ({
 
 app.get("/api/health", async () => ({
   status: "ok",
-  immichConfigured: config.immichApiKey.length > 0,
+  immichConfigured: Boolean(database.prepare("SELECT 1 FROM users WHERE immich_api_key IS NOT NULL LIMIT 1").get()),
   authenticatedAccessRequired: true
 }));
 

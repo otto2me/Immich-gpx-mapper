@@ -5,9 +5,10 @@ import { pipeline } from "node:stream/promises";
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { AppConfig } from "./config.js";
-import { isAuthenticated, clearSessions } from "./auth.js";
+import { clearSessions } from "./auth.js";
 import { BackupManager } from "./backups.js";
 import { readSettings, writeSettings } from "./settings.js";
+import { requireAdmin } from "./access.js";
 
 export async function registerAdminRoutes(app: FastifyInstance, database: DatabaseSync, config: AppConfig) {
   const backups = new BackupManager(database, config);
@@ -23,7 +24,8 @@ export async function registerAdminRoutes(app: FastifyInstance, database: Databa
     if (writes.has(request)) { writes.delete(request); backups.endWrite(reply.statusCode < 400); }
   });
   const requireLogin = async (request: FastifyRequest, reply: import("fastify").FastifyReply) => {
-    if (!isAuthenticated(request)) return reply.code(401).send({ message: "Für Einstellungen und Sicherungen bitte anmelden" });
+    const result = requireAdmin(database, request, reply);
+    if (result) return result;
     reply.header("cache-control", "no-store");
   };
 
@@ -39,12 +41,23 @@ export async function registerAdminRoutes(app: FastifyInstance, database: Databa
   app.post("/api/backups/restore", { preHandler: requireLogin, bodyLimit: 1024 * 1024 * 1024 + 1024 * 1024 }, async (request) => {
     const work = await mkdtemp(join(config.dataDir, ".import-"));
     try {
-      const part = await request.file({ limits: { fileSize: 1024 * 1024 * 1024, files: 1, fields: 0 } });
-      if (!part || part.fieldname !== "file") throw Object.assign(new Error("ZIP-Datei fehlt"), { statusCode: 400 });
-      const path = join(work, "backup.zip");
-      await pipeline(part.file, createWriteStream(path, { flags: "wx", mode: 0o600 }));
-      if (part.file.truncated) throw Object.assign(new Error("ZIP-Datei ist größer als 1 GiB"), { statusCode: 413 });
-      const result = await backups.restore(path);
+      let path: string | undefined;
+      let passphrase: string | undefined;
+      for await (const part of request.parts({ limits: { fileSize: 1024 * 1024 * 1024, files: 1, fields: 1 } })) {
+        if (part.type === "file") {
+          if (part.fieldname !== "file" || path) throw Object.assign(new Error("Ungültige Importdatei"), { statusCode: 400 });
+          path = join(work, "backup.zip");
+          await pipeline(part.file, createWriteStream(path, { flags: "wx", mode: 0o600 }));
+          if (part.file.truncated) throw Object.assign(new Error("ZIP-Datei ist größer als 1 GiB"), { statusCode: 413 });
+        } else if (part.fieldname === "passphrase" && typeof part.value === "string" && !passphrase) {
+          passphrase = part.value;
+        } else {
+          throw Object.assign(new Error("Ungültige Wiederherstellungsdaten"), { statusCode: 400 });
+        }
+      }
+      if (!path) throw Object.assign(new Error("ZIP-Datei fehlt"), { statusCode: 400 });
+      if (!passphrase) throw Object.assign(new Error("Backup-Passphrase fehlt"), { statusCode: 400 });
+      const result = await backups.restore(path, passphrase);
       clearSessions();
       return result;
     } finally { await rm(work, { recursive: true, force: true }); }

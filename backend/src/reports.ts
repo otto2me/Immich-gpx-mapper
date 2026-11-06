@@ -6,10 +6,11 @@ import { parseTourSchedule } from "./tour-selection.js";
 import { toApiTour } from "./tours.js";
 import type { Tour } from "./database.js";
 import { readSettings } from "./settings.js";
+import { requireAlbumOwner, requireAlbumRead, resolveReportShare } from "./access.js";
 
 type ReportPhoto = { assetId: string; caption: string };
 type Chapter = { id: string; title: string; date: string | null; text: string; tourId: string | null; photos: ReportPhoto[] };
-type ReportRow = { id: string; immich_album_id: string; title: string; introduction: string; chapters_json: string; revision: number; updated_at: string };
+type ReportRow = { id: string; immich_album_id: string; title: string; introduction: string; chapters_json: string; is_private: number; revision: number; updated_at: string };
 type ShareRow = { id: string; label: string; createdAt: string; expiresAt: string | null; revokedAt: string | null };
 
 function badRequest(message: string): never {
@@ -39,6 +40,7 @@ function toReport(row: ReportRow | undefined) {
   return {
     id: row.id, title: row.title, introduction: row.introduction,
     chapters: JSON.parse(row.chapters_json) as Chapter[],
+    isPrivate: Boolean(row.is_private),
     revision: row.revision, updatedAt: row.updated_at
   };
 }
@@ -69,6 +71,7 @@ export async function registerReportRoutes(
   app.get<{ Params: { albumId: string } }>(
     "/api/albums/:albumId/report/shares", { preHandler: requireLogin },
     async (request, reply) => {
+      requireAlbumOwner(database, request, request.params.albumId);
       requireSharing();
       reply.header("cache-control", "no-store");
       const report = getReport(request.params.albumId);
@@ -79,6 +82,7 @@ export async function registerReportRoutes(
   app.post<{ Params: { albumId: string }; Body: unknown }>(
     "/api/albums/:albumId/report/shares", { preHandler: requireLogin },
     async (request, reply) => {
+      requireAlbumOwner(database, request, request.params.albumId);
       requireSharing();
       const report = getReport(request.params.albumId);
       if (!report) return reply.code(404).send({ message: "Bitte zuerst den Reisebericht speichern" });
@@ -106,6 +110,7 @@ export async function registerReportRoutes(
   app.post<{ Params: { albumId: string; shareId: string } }>(
     "/api/albums/:albumId/report/shares/:shareId/revoke", { preHandler: requireLogin },
     async (request, reply) => {
+      requireAlbumOwner(database, request, request.params.albumId);
       const report = getReport(request.params.albumId);
       if (!report) return reply.code(404).send({ message: "Freigabelink nicht gefunden" });
       const result = database.prepare(`UPDATE report_shares SET revoked_at = COALESCE(revoked_at, ?)
@@ -121,14 +126,12 @@ export async function registerReportRoutes(
     reply.header("x-robots-tag", "noindex, nofollow");
     const token = request.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
     const invalidLink = () => reply.code(404).send({ message: "Freigabelink ist ungültig, abgelaufen oder widerrufen" });
-    if (!readSettings(database).sharingEnabled) return invalidLink();
     if (!token) return invalidLink();
-    const hash = createHash("sha256").update(token).digest("hex");
-    const row = database.prepare(`SELECT reports.* FROM report_shares
-      JOIN reports ON reports.id = report_shares.report_id
-      WHERE report_shares.token_hash = ? AND report_shares.revoked_at IS NULL
-      AND (report_shares.expires_at IS NULL OR report_shares.expires_at > ?)`
-    ).get(hash, new Date().toISOString()) as ReportRow | undefined;
+    const share = resolveReportShare(database, token);
+    if (!share) return invalidLink();
+    const secure = request.protocol === "https" ? "; Secure" : "";
+    reply.header("set-cookie", `mapper_report_share=${token}; Path=/api/shared-report-assets; HttpOnly; SameSite=Strict; Max-Age=43200${secure}`);
+    const row = database.prepare("SELECT * FROM reports WHERE id = ?").get(share.reportId) as ReportRow | undefined;
     if (!row) return invalidLink();
     const report = toReport(row)!;
     const tourIds = new Set(report.chapters.map((chapter) => chapter.tourId).filter((id): id is string => Boolean(id)));
@@ -142,18 +145,22 @@ export async function registerReportRoutes(
     "/api/albums/:albumId/report",
     async (request, reply) => {
       reply.header("cache-control", "no-store");
-      return toReport(getReport(request.params.albumId));
+      const report = getReport(request.params.albumId);
+      requireAlbumRead(database, request, request.params.albumId, report?.id);
+      return toReport(report);
     }
   );
 
   app.put<{ Params: { albumId: string }; Body: unknown }>(
     "/api/albums/:albumId/report", { preHandler: requireLogin, bodyLimit: 1_000_000 },
     async (request, reply) => {
+      requireAlbumOwner(database, request, request.params.albumId);
       const input = object(request.body);
       const title = text(input.title, "Berichtstitel", 200, true);
       const introduction = text(input.introduction, "Einleitung", 20000);
       const revision = input.revision;
       if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0) badRequest("Ungültige Berichtsversion");
+      if (input.isPrivate !== undefined && typeof input.isPrivate !== "boolean") badRequest("Ungültige Berichtssichtbarkeit");
       if (!Array.isArray(input.chapters) || input.chapters.length > 100) badRequest("Höchstens 100 Kapitel sind erlaubt");
       const chapterIds = new Set<string>();
       const assetIds = new Set<string>();
@@ -188,18 +195,20 @@ export async function registerReportRoutes(
       }
       const now = new Date().toISOString();
       const current = getReport(request.params.albumId);
+      const isPrivate = input.isPrivate ?? Boolean(current?.is_private);
       if ((!current && revision !== 0) || (current && current.revision !== revision)) {
         return reply.code(409).send({ message: "Der Bericht wurde zwischenzeitlich geändert. Bitte die aktuelle Version neu laden." });
       }
       const result = database.prepare(`
-        INSERT INTO reports(id, immich_album_id, title, introduction, chapters_json, revision, updated_at)
-        VALUES (?, ?, ?, ?, ?, 1, ?)
+        INSERT INTO reports(id, immich_album_id, title, introduction, chapters_json, is_private, revision, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 1, ?)
         ON CONFLICT(immich_album_id) DO UPDATE SET
           title = excluded.title, introduction = excluded.introduction,
-          chapters_json = excluded.chapters_json, revision = reports.revision + 1,
+          chapters_json = excluded.chapters_json, is_private = excluded.is_private,
+          revision = reports.revision + 1,
           updated_at = excluded.updated_at
         WHERE reports.revision = ?
-      `).run(current?.id ?? randomUUID(), request.params.albumId, title, introduction, JSON.stringify(chapters), now, revision);
+      `).run(current?.id ?? randomUUID(), request.params.albumId, title, introduction, JSON.stringify(chapters), isPrivate ? 1 : 0, now, revision);
       if (!result.changes) return reply.code(409).send({ message: "Der Bericht wurde zwischenzeitlich geändert. Bitte neu laden." });
       reply.header("cache-control", "no-store");
       return toReport(getReport(request.params.albumId));

@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { access, copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, lstat, mkdir, mkdtemp, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { backup as sqliteBackup, DatabaseSync } from "node:sqlite";
 import { pipeline } from "node:stream/promises";
 import { Transform } from "node:stream";
+import { createBackupCipher, createBackupDecipher } from "./crypto.js";
 import { ZipFile as ZipWriter } from "yazl";
 import { open as openZip, type Entry, type ZipFile } from "yauzl";
 import type { AppConfig } from "./config.js";
@@ -13,7 +14,7 @@ import { readSettings, validateSettings } from "./settings.js";
 const archivePattern = /^mapper-(backup|safety)-\d{8}T\d{9}Z-[a-f0-9-]{36}\.zip$/;
 const maxExtractedBytes = 4 * 1024 * 1024 * 1024;
 const maxArchiveEntries = 20000;
-const tables = ["app_settings", "tours", "comments", "reports", "report_shares"];
+const tables = ["app_settings", "tours", "comments", "reports", "report_shares", "users", "albums", "album_grants"];
 type ArchiveFile = { path: string; size: number; sha256: string };
 type Manifest = { format: string; version: number; createdAt: string; files: ArchiveFile[] };
 type BackupState = { dirty: boolean; lastBackupAt: string | null; lastBackupName: string | null; lastError: string | null };
@@ -58,8 +59,51 @@ function safeArchivePath(name: string) {
   if (name.includes("\\") || name.includes(":")) return false;
   const parts = name.split("/");
   if (parts.some((part) => !part || part === "." || part === "..")) return false;
-  return ["manifest.json", "mapper.sqlite", "config.json"].includes(name) ||
+  return ["manifest.json", "mapper.sqlite", "config.json", "key-encryption.key"].includes(name) ||
     (parts[0] === "uploads" && parts.length > 1);
+}
+
+async function encryptArchive(source: string, destination: string, passphrase: string) {
+  const { header, cipher } = createBackupCipher(passphrase);
+  const output = createWriteStream(destination, { flags: "wx", mode: 0o600 });
+  output.write(header);
+  const appendTag = new Transform({
+    transform(chunk, _encoding, callback) { callback(null, chunk); },
+    flush(callback) {
+      this.push(cipher.getAuthTag());
+      callback();
+    }
+  });
+  await pipeline(createReadStream(source), cipher, appendTag, output);
+}
+
+async function decryptArchive(source: string, destination: string, passphrase: string) {
+  const size = (await stat(source)).size;
+  const headerSize = 36;
+  const tagSize = 16;
+  if (size <= headerSize + tagSize) failure("Verschlüsselte Sicherung ist unvollständig");
+  const file = await open(source, "r");
+  const header = Buffer.alloc(headerSize);
+  const tag = Buffer.alloc(tagSize);
+  try {
+    const first = await file.read(header, 0, headerSize, 0);
+    const last = await file.read(tag, 0, tagSize, size - tagSize);
+    if (first.bytesRead !== headerSize || last.bytesRead !== tagSize) failure("Verschlüsselte Sicherung ist unvollständig");
+  } finally {
+    await file.close();
+  }
+  const decipher = createBackupDecipher(header, passphrase);
+  decipher.setAuthTag(tag);
+  try {
+    await pipeline(
+      createReadStream(source, { start: headerSize, end: size - tagSize - 1 }),
+      decipher,
+      createWriteStream(destination, { flags: "wx", mode: 0o600 })
+    );
+  } catch (error) {
+    await rm(destination, { force: true });
+    throw Object.assign(new Error("Backup-Passphrase ist falsch oder die Sicherung ist beschädigt"), { cause: error });
+  }
 }
 
 async function extractArchive(path: string, destination: string) {
@@ -98,7 +142,7 @@ async function extractArchive(path: string, destination: string) {
   } finally { zip.close(); }
   if (!names.has("manifest.json") || !names.has("mapper.sqlite")) failure("ZIP ist keine vollständige Mapper-Sicherung");
   const manifest = JSON.parse(await readFile(join(destination, "manifest.json"), "utf8")) as Manifest;
-  if (manifest.format !== "immich-gpx-mapper" || manifest.version !== 1 || !Array.isArray(manifest.files) || manifest.files.length !== names.size - 1) failure("Unbekanntes Sicherungsformat");
+  if (manifest.format !== "immich-gpx-mapper" || manifest.version !== 2 || !Array.isArray(manifest.files) || manifest.files.length !== names.size - 1) failure("Unbekanntes Sicherungsformat");
   const verified = new Set<string>();
   for (const file of manifest.files) {
     if (!file || typeof file.path !== "string" || file.path === "manifest.json" || !names.has(file.path) || verified.has(file.path)) failure("Unvollständiges Sicherungsmanifest");
@@ -121,8 +165,8 @@ export async function recoverInterruptedRestore(database: DatabaseSync, config: 
   const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
     id: string; work: string; targets: Array<{ target: string; old: string; hadOld: boolean }>
   };
-  const allowed = [join(dataDir, "uploads"), resolve(config.configFile ?? join(dataDir, "config.json"))];
-  if (!journal || typeof journal.id !== "string" || !Array.isArray(journal.targets) || journal.targets.length > 2 ||
+  const allowed = [join(dataDir, "uploads"), resolve(config.configFile ?? join(dataDir, "config.json")), join(dataDir, "key-encryption.key")];
+  if (!journal || typeof journal.id !== "string" || !Array.isArray(journal.targets) || journal.targets.length > 3 ||
       typeof journal.work !== "string" || dirname(journal.work) !== dataDir || !basename(journal.work).startsWith(".restore-")) {
     failure("Wiederherstellungsjournal ist ungültig; manuelle Prüfung erforderlich", 503);
   }
@@ -152,11 +196,14 @@ export class BackupManager {
   readonly backupDir: string;
   private dataDir: string;
   private configFile: string;
+  private backupPassphrase: string;
 
   constructor(private database: DatabaseSync, config: AppConfig) {
     this.dataDir = resolve(config.dataDir);
     this.backupDir = resolve(config.backupDir ?? join(this.dataDir, "backups"));
     this.configFile = resolve(config.configFile ?? join(this.dataDir, "config.json"));
+    this.backupPassphrase = config.backupPassphrase ?? "";
+    if (this.backupPassphrase.length < 16) failure("BACKUP_PASSPHRASE muss mindestens 16 Zeichen lang sein", 500);
     const uploads = join(this.dataDir, "uploads");
     if (this.backupDir === this.dataDir || this.backupDir === uploads || this.backupDir.startsWith(uploads + sep)) failure("Sicherungsordner darf nicht DATA_DIR oder uploads sein");
   }
@@ -238,6 +285,9 @@ export class BackupManager {
       const snapshot = join(work, "mapper.sqlite");
       await sqliteBackup(this.database, snapshot);
       const files: ArchiveFile[] = [{ path: "mapper.sqlite", size: (await stat(snapshot)).size, sha256: await checksum(snapshot) }];
+      const keyPath = join(work, "key-encryption.key");
+      await copyFile(join(this.dataDir, "key-encryption.key"), keyPath);
+      files.push({ path: "key-encryption.key", size: (await stat(keyPath)).size, sha256: await checksum(keyPath) });
       if (await exists(this.configFile)) {
         if ((await lstat(this.configFile)).isSymbolicLink()) failure("Dateikonfiguration darf kein symbolischer Link sein");
         await copyFile(this.configFile, join(work, "config.json"));
@@ -245,15 +295,17 @@ export class BackupManager {
       }
       files.push(...await uploadFiles(join(this.dataDir, "uploads")));
       if (files.length >= maxArchiveEntries || files.reduce((total, file) => total + file.size, 0) > maxExtractedBytes) failure("Mapper-Daten überschreiten die Sicherungsgrenze von 4 GiB");
-      const manifest: Manifest = { format: "immich-gpx-mapper", version: 1, createdAt: new Date().toISOString(), files };
+      const manifest: Manifest = { format: "immich-gpx-mapper", version: 2, createdAt: new Date().toISOString(), files };
       const archive = new ZipWriter();
-      const outputStream = createWriteStream(`${output}.partial`, { flags: "wx", mode: 0o600 });
+      const plainArchive = join(work, "backup.zip");
+      const outputStream = createWriteStream(plainArchive, { flags: "wx", mode: 0o600 });
       archive.on("error", (error) => outputStream.destroy(error));
       const written = pipeline(archive.outputStream, outputStream);
       for (const file of files) archive.addFile(file.path.startsWith("uploads/") ? join(this.dataDir, ...file.path.split("/")) : join(work, file.path), file.path);
       archive.addBuffer(Buffer.from(JSON.stringify(manifest)), "manifest.json");
       archive.end();
       await written;
+      await encryptArchive(plainArchive, `${output}.partial`, this.backupPassphrase);
       await rename(`${output}.partial`, output);
       this.setState({ dirty: false, lastBackupAt: manifest.createdAt, lastBackupName: name, lastError: null });
       if (prune) await this.prune();
@@ -269,7 +321,7 @@ export class BackupManager {
     finally { this.operation = null; }
   }
 
-  async restore(archive: string) {
+  async restore(archive: string, passphrase: string) {
     if (this.operation || this.activeWrites) failure("Andere Schreibvorgänge laufen; bitte erneut versuchen", 409);
     this.operation = "restore";
     let work = "";
@@ -283,7 +335,10 @@ export class BackupManager {
     const swaps: Array<{ target: string; old: string; hadOld: boolean }> = [];
     try {
       work = await mkdtemp(join(this.dataDir, ".restore-"));
-      await extractArchive(archive, work);
+      const plainArchive = join(work, "backup.zip");
+      await decryptArchive(archive, plainArchive, passphrase);
+      await extractArchive(plainArchive, work);
+      const restoredKeyPath = join(work, "key-encryption.key");
       source = new DatabaseSync(join(work, "mapper.sqlite"), { readOnly: true });
       source.exec("PRAGMA trusted_schema = OFF");
       const check = source.prepare("PRAGMA quick_check").get();
@@ -310,7 +365,10 @@ export class BackupManager {
       for (const table of tables) this.database.exec(`INSERT INTO main.${table} SELECT * FROM restored.${table}`);
       if (this.database.prepare("PRAGMA main.foreign_key_check").all().length) failure("Wiederhergestellte Beziehungen sind ungültig");
       await mkdir(join(work, "uploads"), { recursive: true });
-      const targets = [{ source: join(work, "uploads"), target: join(this.dataDir, "uploads") }];
+      const targets = [
+        { source: join(work, "uploads"), target: join(this.dataDir, "uploads") },
+        { source: restoredKeyPath, target: join(this.dataDir, "key-encryption.key") }
+      ];
       if (await exists(join(work, "config.json"))) targets.push({ source: join(work, "config.json"), target: this.configFile });
       const plans = [];
       for (const item of targets) {

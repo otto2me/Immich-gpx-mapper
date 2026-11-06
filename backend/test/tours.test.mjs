@@ -6,10 +6,10 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import Fastify from "fastify";
 import { openDatabase } from "../dist/database.js";
-import { registerAuth } from "../dist/auth.js";
 import { registerTourRoutes } from "../dist/tours.js";
 import { registerImmichRoutes } from "../dist/immich.js";
 import { parseTourSchedule, tourPhotoFilter } from "../dist/tour-selection.js";
+import { addOwnedAlbum, login, registerTestAuth, testConfig } from "./support.mjs";
 
 test("migration preserves existing tours, comments and file references", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "mapper-migration-"));
@@ -69,7 +69,7 @@ test("local day and time filters respect timezone, DST and interval boundaries",
 
 test("tour APIs isolate albums, files and comments and filter before photo pagination", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "mapper-api-"));
-  const config = { dataDir, appPassword: "RegressionPassword123!", immichApiKey: "dummy", immichApiUrl: "http://immich.test" };
+  const config = testConfig(dataDir);
   const database = await openDatabase(config);
   const app = Fastify();
   const originalFetch = globalThis.fetch;
@@ -86,15 +86,15 @@ test("tour APIs isolate albums, files and comments and filter before photo pagin
     return Response.json({ assets: { items, total: items.length, nextPage: page * size < assets.length ? String(page + 1) : null } });
   };
   try {
-    await registerAuth(app, config);
-    const immich = await registerImmichRoutes(app, config, database);
+    const { admin, encryptionKey } = await registerTestAuth(app, database, config);
+    addOwnedAlbum(database, admin.id, "album");
+    const immich = await registerImmichRoutes(app, config, database, encryptionKey);
     assert.equal(await immich.albumContainsAssets("album", ["asset-0", "asset-1100"]), true);
     assert.equal(await immich.albumContainsAssets("album", ["missing"]), false);
     await registerTourRoutes(app, database, config);
     assert.equal((await app.inject({ url: "/api/assets/asset-0/thumbnail?size=invalid" })).statusCode, 400);
     assert.equal((await app.inject({ method: "POST", url: "/api/albums/album/tours", payload: { date: "2026-08-12" } })).statusCode, 401);
-    const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { password: config.appPassword } });
-    const headers = { cookie: login.headers["set-cookie"].split(";")[0] };
+    const headers = await login(app);
     const create = async (date) => app.inject({ method: "POST", url: "/api/albums/album/tours", headers, payload: { date, timeZone: "Europe/Berlin", title: date } });
     const first = await create("2026-08-12");
     assert.equal(first.statusCode, 201);
@@ -110,29 +110,29 @@ test("tour APIs isolate albums, files and comments and filter before photo pagin
     assert.equal((await app.inject({ method: "PUT", url: selected, headers, payload: { date: "2026-08-13" } })).statusCode, 409);
     assert.equal((await app.inject({ method: "PUT", url: selected, headers, payload: { startTime: "24:00" } })).statusCode, 400);
     assert.equal((await app.inject({ url: `/api/tours/other?tourId=${firstTour.id}` })).statusCode, 404);
-    const pageOne = await app.inject({ url: `/api/albums/album/assets?tourId=${firstTour.id}&page=1` });
+    const pageOne = await app.inject({ url: `/api/albums/album/assets?tourId=${firstTour.id}&page=1`, headers });
     assert.equal(pageOne.statusCode, 200);
     assert.equal(pageOne.json().items.length, 48);
     assert.equal(pageOne.json().total, 60);
     assert.equal(pageOne.json().hasMore, true);
-    const pageTwo = await app.inject({ url: `/api/albums/album/assets?tourId=${firstTour.id}&page=2` });
+    const pageTwo = await app.inject({ url: `/api/albums/album/assets?tourId=${firstTour.id}&page=2`, headers });
     assert.equal(pageTwo.json().items.length, 12);
     assert.equal(pageTwo.json().hasMore, false);
-    const markers = await app.inject({ url: `/api/albums/album/map-markers?tourId=${firstTour.id}` });
+    const markers = await app.inject({ url: `/api/albums/album/map-markers?tourId=${firstTour.id}`, headers });
     assert.equal(markers.json().length, 60);
     const comment = await app.inject({ method: "POST", url: `/api/tours/album/comments?tourId=${firstTour.id}`, headers, payload: { text: "First tour only" } });
     assert.equal(comment.statusCode, 201);
-    assert.equal((await app.inject({ url: `/api/tours/album/comments?tourId=${second.json().id}` })).json().length, 0);
+    assert.equal((await app.inject({ url: `/api/tours/album/comments?tourId=${second.json().id}`, headers })).json().length, 0);
     const multipart = '--boundary\r\nContent-Disposition: form-data; name="file"; filename="track.gpx"\r\nContent-Type: application/gpx+xml\r\n\r\n<gpx><trk/></gpx>\r\n--boundary--\r\n';
     const upload = await app.inject({ method: "POST", url: `/api/tours/album/gpx?tourId=${firstTour.id}`, headers: { ...headers, "content-type": "multipart/form-data; boundary=boundary" }, payload: multipart });
     assert.equal(upload.statusCode, 201);
-    assert.equal((await app.inject({ url: `/api/tours/album/gpx?tourId=${firstTour.id}` })).statusCode, 200);
-    assert.equal((await app.inject({ url: `/api/tours/album/gpx?tourId=${second.json().id}` })).statusCode, 404);
+    assert.equal((await app.inject({ url: `/api/tours/album/gpx?tourId=${firstTour.id}`, headers })).statusCode, 200);
+    assert.equal((await app.inject({ url: `/api/tours/album/gpx?tourId=${second.json().id}`, headers })).statusCode, 404);
     const imageBody = '--image\r\nContent-Disposition: form-data; name="file"; filename="map.png"\r\nContent-Type: image/png\r\n\r\npreview\r\n--image--\r\n';
     const imageUpload = await app.inject({ method: "POST", url: `/api/tours/album/images/komoot-map?tourId=${firstTour.id}`, headers: { ...headers, "content-type": "multipart/form-data; boundary=image" }, payload: imageBody });
     assert.equal(imageUpload.statusCode, 201);
-    assert.equal((await app.inject({ url: `/api/tours/album/images/komoot-map?tourId=${firstTour.id}` })).statusCode, 200);
-    assert.equal((await app.inject({ url: `/api/tours/album/images/komoot-map?tourId=${second.json().id}` })).statusCode, 404);
+    assert.equal((await app.inject({ url: `/api/tours/album/images/komoot-map?tourId=${firstTour.id}`, headers })).statusCode, 200);
+    assert.equal((await app.inject({ url: `/api/tours/album/images/komoot-map?tourId=${second.json().id}`, headers })).statusCode, 404);
   } finally {
     globalThis.fetch = originalFetch;
     await app.close();
